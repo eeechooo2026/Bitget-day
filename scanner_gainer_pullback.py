@@ -3,11 +3,12 @@ import time
 from datetime import datetime
 import os
 import requests
+import json
 
 # ================== 配置区域 ==================
-# 你需要修改以下两个变量为你自己的 WxPusher 信息
-WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"  # ⚠️ 替换成你自己的 appToken
-WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"        # ⚠️ 替换成你自己的 UID
+# ⚠️ 请替换成你自己的 WxPusher 信息
+WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"  # 替换成你的 appToken
+WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"        # 替换成你的 UID
 
 TOP_VOLUME = 100           # 按前天成交量取前N个合约
 MIN_GAIN = 10.0            # 前天最小涨幅（百分比）
@@ -15,26 +16,44 @@ PUSH_TOP_N = 10            # 推送前N名
 # =============================================
 
 def send_push_wxpusher(message):
-    """使用 WxPusher 推送消息到微信"""
+    """使用 WxPusher 推送消息到微信（POST 请求版本）"""
+    url = "https://wxpusher.zjiecode.com/api/send/message"
+    
+    # 构造 POST 请求的 body（JSON 格式）
+    payload = {
+        "appToken": WX_PUSHER_APP_TOKEN,
+        "content": message,
+        "summary": message[:50] if len(message) > 50 else message,
+        "contentType": 1,        # 1:纯文本, 2:HTML, 3:Markdown
+        "uids": [WX_PUSHER_UID], # 注意：必须是数组格式
+    }
+    
+    # 设置正确的请求头
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
     try:
-        url = "https://wxpusher.zjiecode.com/api/send/message"
-        payload = {
-            "appToken": WX_PUSHER_APP_TOKEN,
-            "content": message,
-            "summary": message[:50],  # 微信通知栏显示的摘要
-            "contentType": 1,         # 1:文字, 2:HTML, 3:Markdown
-            "uids": [WX_PUSHER_UID],  # 注意：这里是列表形式
-        }
-        
-        response = requests.post(url, json=payload, timeout=10)
+        print("📤 正在发送推送请求...")
+        response = requests.post(
+            url, 
+            data=json.dumps(payload),
+            headers=headers,
+            timeout=10
+        )
         result = response.json()
         
         if result.get("code") == 1000:
             print("✅ WxPusher 推送成功!")
+            print(f"   返回详情: {result}")
             return True
         else:
-            print(f"❌ WxPusher 推送失败: {result}")
+            print(f"❌ WxPusher 推送失败，错误码: {result.get('code')}")
+            print(f"   错误信息: {result}")
             return False
+    except requests.exceptions.Timeout:
+        print("❌ 推送超时: 请求超过10秒未响应")
+        return False
     except Exception as e:
         print(f"❌ 推送异常: {e}")
         return False
@@ -151,7 +170,7 @@ def main():
     # 6. 生成推送消息
     current_date = datetime.now().strftime('%Y-%m-%d')
     msg_lines = [
-        f"📊 **Bitget 合约涨幅回调扫描**",
+        f"📊 Bitget 合约涨幅回调扫描",
         f"🕘 时间：{current_date} 09:00（北京时间）",
         f"📈 条件：前天涨幅 > {MIN_GAIN}% 且 昨日收跌",
         f"📋 按前天涨幅排名 Top {len(top_results)}：",
