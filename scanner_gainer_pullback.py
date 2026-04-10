@@ -13,24 +13,34 @@ PUSH_TOP_N = 10            # 推送前N名
 PUSH_WEBHOOK = os.environ.get('WEBHOOK_URL')
 
 def send_push(message):
-    """推送消息到微信（Server酱格式）"""
+    """使用 WxPusher 推送消息到微信"""
     if not PUSH_WEBHOOK:
-        print("⚠️ 未配置 WEBHOOK_URL，仅打印日志。")
+        print("⚠️ 未配置 WxPusher 凭证，仅打印日志。")
         return
+
+    # 注意：此时 PUSH_WEBHOOK 环境变量里存放的是 appToken
+    app_token = PUSH_WEBHOOK
+    uid = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"  # 这里替换成你的 UID
+
+    url = "https://wxpusher.zjiecode.com/api/send/message"
+
+    params = {
+        "appToken": app_token,
+        "uid": uid,
+        "content": message
+    }
+
     try:
-        payload = {"title": "Bitget 合约涨幅回调扫描", "desp": message}
-        resp = requests.post(PUSH_WEBHOOK, data=payload, timeout=10)
-        if resp.status_code == 200:
-            result = resp.json()
-            if result.get('code') == 0:
-                print("✅ 推送成功")
-            else:
-                print(f"❌ 推送失败: {result.get('message')}")
+        response = requests.get(url, params=params, timeout=10)
+        result = response.json()
+        
+        if result.get("code") == 1000:
+            print("✅ WxPusher 推送成功")
         else:
-            print(f"❌ 推送HTTP错误: {resp.status_code}")
+            print(f"❌ WxPusher 推送失败: {result}")
     except Exception as e:
         print(f"❌ 推送异常: {e}")
-
+        
 def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"🚀 开始扫描 - 北京时间 {beijing_time}")
