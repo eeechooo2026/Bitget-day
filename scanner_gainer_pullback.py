@@ -5,42 +5,40 @@ import os
 import requests
 
 # ================== 配置区域 ==================
+# 你需要修改以下两个变量为你自己的 WxPusher 信息
+WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"  # ⚠️ 替换成你自己的 appToken
+WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"        # ⚠️ 替换成你自己的 UID
+
 TOP_VOLUME = 100           # 按前天成交量取前N个合约
 MIN_GAIN = 10.0            # 前天最小涨幅（百分比）
 PUSH_TOP_N = 10            # 推送前N名
 # =============================================
 
-PUSH_WEBHOOK = os.environ.get('WEBHOOK_URL')
-
-def send_push(message):
+def send_push_wxpusher(message):
     """使用 WxPusher 推送消息到微信"""
-    if not PUSH_WEBHOOK:
-        print("⚠️ 未配置 WxPusher 凭证，仅打印日志。")
-        return
-
-    # 注意：此时 PUSH_WEBHOOK 环境变量里存放的是 appToken
-    app_token = PUSH_WEBHOOK
-    uid = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"  # 这里替换成你的 UID
-
-    url = "https://wxpusher.zjiecode.com/api/send/message"
-
-    params = {
-        "appToken": app_token,
-        "uid": uid,
-        "content": message
-    }
-
     try:
-        response = requests.get(url, params=params, timeout=10)
+        url = "https://wxpusher.zjiecode.com/api/send/message"
+        payload = {
+            "appToken": WX_PUSHER_APP_TOKEN,
+            "content": message,
+            "summary": message[:50],  # 微信通知栏显示的摘要
+            "contentType": 1,         # 1:文字, 2:HTML, 3:Markdown
+            "uids": [WX_PUSHER_UID],  # 注意：这里是列表形式
+        }
+        
+        response = requests.post(url, json=payload, timeout=10)
         result = response.json()
         
         if result.get("code") == 1000:
-            print("✅ WxPusher 推送成功")
+            print("✅ WxPusher 推送成功!")
+            return True
         else:
             print(f"❌ WxPusher 推送失败: {result}")
+            return False
     except Exception as e:
         print(f"❌ 推送异常: {e}")
-        
+        return False
+
 def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"🚀 开始扫描 - 北京时间 {beijing_time}")
@@ -72,11 +70,10 @@ def main():
         return
     
     # 2. 获取每个合约的前天成交量（用于排序筛选Top N）
-    # 注意：需要先获取OHLCV才能得到成交量，这一步会比较耗时
     print(f"⏳ 正在获取各合约前天成交量（共{len(swap_symbols)}个）...")
     
     volume_dict = {}  # symbol -> 前天成交量
-    ohlcv_cache = {}  # symbol -> ohlcv数据缓存（后面还会用到）
+    ohlcv_cache = {}  # symbol -> ohlcv数据缓存
     
     for i, symbol in enumerate(swap_symbols):
         try:
@@ -183,8 +180,8 @@ def main():
     print(message)
     print("="*50)
     
-    # 7. 推送
-    send_push(message)
+    # 7. 推送消息
+    send_push_wxpusher(message)
 
 if __name__ == "__main__":
     main()
