@@ -6,8 +6,8 @@ import json
 
 # ================== 配置区域 ==================
 # ⚠️ 请替换成你自己的 WxPusher 信息
-WX_PUSHER_APP_TOKEN = "AT_你的AppToken"  # 替换成你的 appToken
-WX_PUSHER_UID = "UID_你的UID"           # 替换成你的 UID
+WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"  # 替换成你的 appToken
+WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"           # 替换成你的 UID
 
 TOP_VOLUME = 100           # 按前天成交量取前N个合约
 MIN_AMPLITUDE = 10.0       # 前天最小振幅（百分比）—— 已从“涨幅”改为“振幅”
