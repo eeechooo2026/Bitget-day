@@ -5,12 +5,12 @@ import requests
 import json
 
 # ================== 配置区域 ==================
-# ⚠️ 请替换成你自己的 WxPusher 信息
-WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"  # 替换成你的 appToken
-WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"           # 替换成你的 UID
+# WxPusher 配置（已自动填充）
+WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
+WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
 TOP_VOLUME = 100           # 按前天成交量取前N个合约
-MIN_AMPLITUDE = 10.0       # 前天最小振幅（百分比）—— 已从“涨幅”改为“振幅”
+MIN_AMPLITUDE = 10.0       # 前天最小振幅（百分比）
 PUSH_TOP_N = 10            # 推送前N名
 # =============================================
 
@@ -41,7 +41,7 @@ def send_push_wxpusher(message):
 
 def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"🚀 开始扫描（前天振幅>{MIN_AMPLITUDE}%且昨日收阳但未破前高）- 北京时间 {beijing_time}")
+    print(f"🚀 开始扫描（前天振幅>{MIN_AMPLITUDE}% + 前天收盘突破前高 + 昨日收阳未破前高）- 北京时间 {beijing_time}")
     
     exchange = ccxt.bitget({
         'enableRateLimit': True,
@@ -83,8 +83,8 @@ def main():
     
     for i, symbol in enumerate(scan_symbols):
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=5)
-            if len(ohlcv) >= 4:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=6)
+            if len(ohlcv) >= 5:
                 volume_day_before = ohlcv[-3][5]
                 volume_dict[symbol] = volume_day_before
                 ohlcv_cache[symbol] = ohlcv
@@ -104,16 +104,19 @@ def main():
     top_volume_symbols = [sym for sym, vol in sorted_by_volume[:TOP_VOLUME] if vol > 0]
     print(f"✅ 按成交量筛选完成，取前 {len(top_volume_symbols)} 个")
     
-    # ========== 分析振幅和形态 ==========
+    # ========== 分析振幅、突破和形态 ==========
     result_list = []
     
     for symbol in top_volume_symbols:
         try:
             ohlcv = ohlcv_cache.get(symbol)
-            if not ohlcv or len(ohlcv) < 5:
-                ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=5)
-                if len(ohlcv) < 5:
+            if not ohlcv or len(ohlcv) < 6:
+                ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=6)
+                if len(ohlcv) < 6:
                     continue
+            
+            # 大前天数据（索引-4）
+            high_two_days_before = ohlcv[-4][2]   # 大前天最高价
             
             # 前天数据（索引-3）
             high_day_before = ohlcv[-3][2]   # 前天最高价
@@ -123,25 +126,36 @@ def main():
             # 昨天数据（索引-2）
             open_yesterday = ohlcv[-2][1]    # 昨天开盘价
             close_yesterday = ohlcv[-2][4]   # 昨天收盘价
+            high_yesterday = ohlcv[-2][2]    # 昨天最高价（用于判断是否突破？不需要）
+            
+            # 前天数据用于未破前高判断：前天最高价（不是大前天）
+            high_day_before_for_check = high_day_before
             
             # 计算前天振幅
             amplitude_day_before = (high_day_before - low_day_before) / low_day_before * 100
             
-            # 判断昨天是否收阳
-            is_bullish_yesterday = close_yesterday > open_yesterday
+            # 条件1：前天振幅 > 10%
+            condition_amplitude = amplitude_day_before >= MIN_AMPLITUDE
             
-            # 判断昨天收盘价是否低于前天最高价
-            is_below_high = close_yesterday < high_day_before
+            # 条件2：前天收盘 > 大前天最高（突破前高）
+            condition_breakout = close_day_before > high_two_days_before
             
-            if amplitude_day_before >= MIN_AMPLITUDE and is_bullish_yesterday and is_below_high:
+            # 条件3：昨天收阳
+            condition_bullish = close_yesterday > open_yesterday
+            
+            # 条件4：昨天收盘 < 前天最高（未破前高）
+            condition_not_break_high = close_yesterday < high_day_before_for_check
+            
+            if condition_amplitude and condition_breakout and condition_bullish and condition_not_break_high:
                 result_list.append({
                     'symbol': symbol.replace('/USDT:USDT', '').replace('/USDT', ''),
                     'amplitude': round(amplitude_day_before, 2),
-                    'high_day_before': round(high_day_before, 4),
-                    'low_day_before': round(low_day_before, 4),
+                    'close_day_before': round(close_day_before, 4),
+                    'high_two_days_before': round(high_two_days_before, 4),
                     'close_yesterday': round(close_yesterday, 4),
+                    'high_day_before': round(high_day_before, 4),
                 })
-                print(f"✓ {symbol} 前天振幅 {amplitude_day_before:.2f}%，昨日收阳但未破前高")
+                print(f"✓ {symbol} 前天振幅{amplitude_day_before:.2f}%，突破前高，昨日收阳未破前高")
             
             time.sleep(0.2)
         except Exception as e:
@@ -154,9 +168,9 @@ def main():
     # ========== 生成推送消息 ==========
     current_date = datetime.now().strftime('%Y-%m-%d')
     msg_lines = [
-        f"📊 Bitget 合约振幅扫描 - 收阳未破前高版",
+        f"📊 Bitget 合约扫描 - 振幅突破+蓄势版",
         f"🕘 时间：{current_date} 09:00（北京时间）",
-        f"📈 条件：前天振幅 > {MIN_AMPLITUDE}% + 昨日收阳 + 昨日收盘 < 前天最高",
+        f"📈 条件：前天振幅>{MIN_AMPLITUDE}% + 前天收盘突破前高 + 昨日收阳未破前高",
         f"📋 按前天振幅排名 Top {len(top_results)}：",
         "━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -166,13 +180,13 @@ def main():
             msg_lines.append(
                 f"{idx}. {item['symbol']}\n"
                 f"   前天振幅: ±{item['amplitude']}%\n"
-                f"   前天最高: {item['high_day_before']}\n"
-                f"   前天最低: {item['low_day_before']}\n"
-                f"   昨天收盘: {item['close_yesterday']} 📊"
+                f"   前天收盘: {item['close_day_before']}\n"
+                f"   突破前高: {item['high_two_days_before']} → 被突破\n"
+                f"   昨天收盘: {item['close_yesterday']} 📊 (低于前天最高 {item['high_day_before']})"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：昨日收阳但未破前高，可能处于蓄势阶段")
+        msg_lines.append("💡 解读：前天大振幅突破前高，昨日收阳但未破前高，可能蓄势待涨")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
