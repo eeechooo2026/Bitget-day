@@ -42,7 +42,7 @@ def send_push_wxpusher(message):
 
 def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"🚀 开始4小时K线扫描（上上根振幅>{MIN_AMPLITUDE}% + 上一根收跌）- 北京时间 {beijing_time}")
+    print(f"🚀 开始4小时K线扫描（上上根振幅>{MIN_AMPLITUDE}% + 上上根收盘突破前高 + 上一根收跌）- 北京时间 {beijing_time}")
     
     # 初始化 Bitget 合约接口
     exchange = ccxt.bitget({
@@ -95,32 +95,40 @@ def main():
     print(f"⏳ 正在分析4小时K线形态...")
     for symbol in top_volume_symbols:
         try:
-            # 获取最近3根已收盘的4小时K线
-            # 索引0: 上上根（最旧）, 索引1: 上一根, 索引2: 最新（还未收盘，但这里取的是已收盘的）
-            # 实际上 limit=3 取到的是最近3根已收盘的K线
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=3)
-            if len(ohlcv) < 3:
+            # 获取最近4根已收盘的4小时K线
+            # 索引0: 上上上根（最旧）, 索引1: 上上根, 索引2: 上一根, 索引3: 最新
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=4)
+            if len(ohlcv) < 4:
                 continue
             
-            # 上上根（索引0）- 计算振幅
-            high_prev2 = ohlcv[0][2]   # 上上根最高价
-            low_prev2 = ohlcv[0][3]    # 上上根最低价
+            # 上上上根（索引0）- 用于判断突破
+            high_prev3 = ohlcv[0][2]   # 上上上根最高价
+            
+            # 上上根（索引1）- 计算振幅和收盘价
+            high_prev2 = ohlcv[1][2]   # 上上根最高价
+            low_prev2 = ohlcv[1][3]    # 上上根最低价
+            close_prev2 = ohlcv[1][4]  # 上上根收盘价
+            
+            # 计算上上根振幅
             amplitude_prev2 = (high_prev2 - low_prev2) / low_prev2 * 100
             
-            # 上一根（索引1）- 判断是否收跌
-            open_prev1 = ohlcv[1][1]   # 上一根开盘价
-            close_prev1 = ohlcv[1][4]  # 上一根收盘价
+            # 条件1：上上根收盘价 > 上上上根最高价（突破前高）
+            condition_breakout = close_prev2 > high_prev3
+            
+            # 上一根（索引2）- 判断是否收跌
+            open_prev1 = ohlcv[2][1]   # 上一根开盘价
+            close_prev1 = ohlcv[2][4]  # 上一根收盘价
             is_red_prev1 = close_prev1 < open_prev1
             
-            if amplitude_prev2 >= MIN_AMPLITUDE and is_red_prev1:
+            if amplitude_prev2 >= MIN_AMPLITUDE and condition_breakout and is_red_prev1:
                 result_list.append({
                     'symbol': symbol.replace('/USDT:USDT', ''),
                     'amplitude': round(amplitude_prev2, 2),
-                    'high_prev2': round(high_prev2, 4),
-                    'low_prev2': round(low_prev2, 4),
+                    'close_prev2': round(close_prev2, 4),
+                    'high_prev3': round(high_prev3, 4),
                     'close_prev1': round(close_prev1, 4),
                 })
-                print(f"✓ {symbol} 上上根振幅 {amplitude_prev2:.2f}%，上一根收跌")
+                print(f"✓ {symbol} 上上根振幅{amplitude_prev2:.2f}%，突破前高({high_prev3:.4f})，上一根收跌")
             
             time.sleep(0.2)
         except Exception as e:
@@ -134,9 +142,9 @@ def main():
     # 5. 生成推送消息
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时K线扫描",
+        f"📊 Bitget 4小时K线扫描 - 振幅突破+回调版",
         f"🕘 时间：{current_time}（北京时间）",
-        f"📈 条件：上上根4小时K棒振幅 > {MIN_AMPLITUDE}% 且 上一根4小时K棒收跌",
+        f"📈 条件：上上根振幅>{MIN_AMPLITUDE}% + 上上根收盘突破前高 + 上一根收跌",
         f"📋 按上上根振幅排名 Top {len(top_results)}：",
         "━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -146,12 +154,13 @@ def main():
             msg_lines.append(
                 f"{idx}. {item['symbol']}\n"
                 f"   上上根振幅: ±{item['amplitude']}%\n"
-                f"   上上根: {item['low_prev2']} → {item['high_prev2']}\n"
+                f"   上上根收盘: {item['close_prev2']}\n"
+                f"   突破前高: {item['high_prev3']} → 被突破\n"
                 f"   上一根收盘: {item['close_prev1']} 📉"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：上上根大振幅后，上一根回调，可能提供短线机会")
+        msg_lines.append("💡 解读：上上根大振幅突破前高，上一根回调，可能提供二次入场机会")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
