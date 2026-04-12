@@ -1,0 +1,19 @@
+name: Bitget 4小时K线回调扫描
+
+on:
+  schedule:
+    # 北京时间 8:01, 12:01, 16:01, 20:01, 00:01 分别对应 UTC 0:01, 4:01, 8:01, 12:01, 16:01
+    - cron: '1 0,4,8,12,16 * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 4-hour pullback scan
+        run: python scanner_4h_pullback.py
