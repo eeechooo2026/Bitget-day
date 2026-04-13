@@ -1,4 +1,4 @@
-name: Bitget 合约扫描 - 杠杆≥50倍（趋势+量能版）
+name: Bitget 合约扫描 - 趋势+量能版
 
 on:
   schedule:
