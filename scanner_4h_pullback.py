@@ -43,7 +43,9 @@ def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"🚀 开始4小时K线扫描 - 北京时间 {beijing_time}")
     print(f"📋 筛选范围：24h涨幅榜前{TOP_GAINERS}名")
-    print(f"📈 条件：上上根收阳 + 上上根收盘突破前高 + 上根收跌")
+    print(f"📈 策略逻辑：")
+    print(f"   • 上上根4小时K棒收阳 + 收盘突破上上上根最高价")
+    print(f"   • 上根4小时K棒收跌（回调确认）")
     print(f"📊 排序：按上上根K棒振幅从高到低")
     
     # 初始化 Bitget 合约接口
@@ -85,14 +87,14 @@ def main():
         gain = ticker['percentage']
         print(f"   {i}. {sym.replace('/USDT:USDT', '')} 24h涨幅: {gain:.2f}%")
     
-    # ========== 第二步：获取K线数据进行分析 ==========
+    # ========== 第二步：获取4小时K线数据 ==========
     print(f"⏳ 正在获取涨幅榜前{TOP_GAINERS}名币种的4小时K线数据...")
     ohlcv_cache = {}
     
     for i, symbol in enumerate(top_gainer_symbols):
         try:
-            # 需要至少4根4小时K线（上上上根、上上根、上根、当前根）
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=5)
+            # 获取4根已收盘的4小时K线（足够分析上上上根、上上根、上根）
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=4)
             if len(ohlcv) >= 4:
                 ohlcv_cache[symbol] = ohlcv
             else:
@@ -115,22 +117,22 @@ def main():
             if not ohlcv or len(ohlcv) < 4:
                 continue
             
-            # 索引说明（按时间从旧到新）：
-            # ohlcv[0] = 上上上根K棒（最旧）
-            # ohlcv[1] = 上上根K棒
-            # ohlcv[2] = 上根K棒
-            # ohlcv[3] = 当前K棒（可能未收盘，不参与判断）
+            # 索引说明（按时间从旧到新，limit=4，全部已收盘）：
+            # ohlcv[0] = 上上上根（最旧）
+            # ohlcv[1] = 上上根
+            # ohlcv[2] = 上根
+            # ohlcv[3] = 当前K线的前一根（不使用，因为策略只用上上根和上根）
             
-            # 上上上根数据（索引0）
-            high_prev3 = ohlcv[0][2]   # 上上上根最高价
+            # ===== 上上上根数据（索引0）=====
+            high_prev3 = ohlcv[0][2]   # 上上上根最高价（突破参考点）
             
-            # 上上根数据（索引1）
+            # ===== 上上根数据（索引1）- 核心判断 =====
             open_prev2 = ohlcv[1][1]   # 上上根开盘价
             close_prev2 = ohlcv[1][4]  # 上上根收盘价
             high_prev2 = ohlcv[1][2]   # 上上根最高价
             low_prev2 = ohlcv[1][3]    # 上上根最低价
             
-            # 上根数据（索引2）
+            # ===== 上根数据（索引2）- 回调确认 =====
             open_prev1 = ohlcv[2][1]   # 上根开盘价
             close_prev1 = ohlcv[2][4]  # 上根收盘价
             
@@ -140,7 +142,7 @@ def main():
             # 条件2：上上根收盘是否突破上上上根最高价
             is_breakout = close_prev2 > high_prev3
             
-            # 条件3：上根是否收跌
+            # 条件3：上根是否收跌（回调确认）
             is_red_prev1 = close_prev1 < open_prev1
             
             # 计算上上根振幅
@@ -175,11 +177,11 @@ def main():
     # ========== 第五步：生成推送消息 ==========
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时K线扫描",
+        f"📊 Bitget 4小时K线扫描 - 突破回调版",
         f"🕘 时间：{current_time}（北京时间）",
-        f"📈 筛选条件：",
-        f"   • 上上根4小时K棒收阳 + 收盘突破前高",
-        f"   • 上根4小时K棒收跌",
+        f"📈 策略逻辑：",
+        f"   • 上上根4小时K棒收阳 + 收盘突破上上上根最高价",
+        f"   • 上根4小时K棒收跌（回调确认）",
         f"📋 筛选范围：24h涨幅榜前{TOP_GAINERS}名",
         f"📊 排序：按上上根K棒振幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
