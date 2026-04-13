@@ -1,4 +1,4 @@
-name: Bitget 合约扫描 - 振幅突破+回调版
+name: Bitget 合约扫描 - 前天涨幅榜+昨日收跌
 
 on:
   schedule:
