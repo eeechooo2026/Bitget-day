@@ -1,7 +1,8 @@
-name: Bitget 涨幅回调扫描
+name: Bitget 合约扫描 - 振幅突破+回调版
 
 on:
   schedule:
+    # 北京时间 9:15 = UTC 1:15
     - cron: '15 1 * * *'
   workflow_dispatch:
 
@@ -14,5 +15,5 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install -r requirements.txt
-      - name: Run scan script
+      - name: Run scan
         run: python scanner_gainer_pullback.py
