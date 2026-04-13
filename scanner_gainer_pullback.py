@@ -9,8 +9,7 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-TOP_GAINERS = 50           # 按24h涨幅取前N个合约
-MIN_AMPLITUDE = 10.0       # 前天最小振幅（百分比）
+TOP_GAINERS = 50           # 按前天涨幅取前N个合约
 PUSH_TOP_N = 10            # 推送前N名
 # =============================================
 
@@ -42,8 +41,9 @@ def send_push_wxpusher(message):
 def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"🚀 开始扫描 - 北京时间 {beijing_time}")
-    print(f"📋 筛选范围：24h涨幅榜前{TOP_GAINERS}名")
-    print(f"📈 条件：前天振幅>{MIN_AMPLITUDE}% + 前天收盘突破前高 + 昨日收跌")
+    print(f"📋 筛选逻辑：遍历所有合约 → 计算前天涨幅 → 取前{TOP_GAINERS}名")
+    print(f"📈 条件：前天涨幅前{TOP_GAINERS}名 + 昨天收跌")
+    print(f"📊 排序：按前天K棒振幅从高到低")
     
     # 初始化 Bitget 合约接口
     exchange = ccxt.bitget({
@@ -53,145 +53,133 @@ def main():
         },
     })
     
-    # ========== 第一步：获取24h涨幅榜前50名 ==========
-    print("📡 正在获取所有合约的24h涨幅数据...")
+    # ========== 第一步：获取所有合约 ==========
+    print("📡 正在加载合约市场数据...")
     try:
-        tickers = exchange.fetch_tickers()
-        print(f"📊 共获取 {len(tickers)} 个交易对数据")
+        markets = exchange.load_markets()
     except Exception as e:
-        print(f"❌ 获取市场数据失败: {e}")
+        print(f"❌ 加载市场数据失败: {e}")
         return
     
     # 筛选 USDT 本位永续合约
-    usdt_swap_tickers = {}
-    for symbol, ticker in tickers.items():
-        if '/USDT:USDT' in symbol and ticker.get('percentage') is not None:
-            usdt_swap_tickers[symbol] = ticker
+    swap_symbols = []
+    for symbol, market in markets.items():
+        if market.get('type') == 'swap' and symbol.endswith('/USDT:USDT'):
+            swap_symbols.append(symbol)
     
-    # 按24h涨跌幅排序，取前 TOP_GAINERS 名
-    sorted_by_gain = sorted(
-        usdt_swap_tickers.items(),
-        key=lambda x: x[1]['percentage'],
-        reverse=True
-    )
-    top_gainer_symbols = [sym for sym, _ in sorted_by_gain[:TOP_GAINERS]]
+    print(f"📊 共找到 {len(swap_symbols)} 个 USDT 本位合约")
     
-    print(f"✅ 涨幅榜筛选完成，取前 {len(top_gainer_symbols)} 个")
+    if len(swap_symbols) == 0:
+        print("❌ 未找到合约交易对")
+        return
     
-    # 打印涨幅榜前10名
-    print(f"📊 24h涨幅榜前10名：")
-    for i, (sym, ticker) in enumerate(sorted_by_gain[:10], 1):
-        gain = ticker['percentage']
-        print(f"   {i}. {sym.replace('/USDT:USDT', '')} 24h涨幅: {gain:.2f}%")
-    
-    # ========== 第二步：获取K线数据进行分析 ==========
-    print(f"⏳ 正在获取涨幅榜前{TOP_GAINERS}名币种的K线数据...")
+    # ========== 第二步：遍历计算前天涨幅 ==========
+    print(f"⏳ 正在遍历 {len(swap_symbols)} 个合约，计算前天涨幅...")
+    gain_dict = {}      # 存储前天涨幅
+    amplitude_dict = {} # 存储前天振幅
+    close_yesterday_dict = {} # 存储昨天收盘价
+    open_yesterday_dict = {}  # 存储昨天开盘价
     ohlcv_cache = {}
     
-    for i, symbol in enumerate(top_gainer_symbols):
+    for i, symbol in enumerate(swap_symbols):
         try:
-            # 获取6根日线数据（用于分析前天、大前天、昨天）
+            # 获取6根日线数据（需要大前天、前天、昨天的数据）
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=6)
             if len(ohlcv) >= 6:
+                # 前天数据（索引-3）
+                close_day_before = ohlcv[-3][4]      # 前天收盘价
+                close_two_days_before = ohlcv[-4][4] # 大前天收盘价
+                high_day_before = ohlcv[-3][2]       # 前天最高价
+                low_day_before = ohlcv[-3][3]        # 前天最低价
+                
+                # 昨天数据（索引-2）
+                open_yesterday = ohlcv[-2][1]        # 昨天开盘价
+                close_yesterday = ohlcv[-2][4]       # 昨天收盘价
+                
+                # 计算前天涨幅
+                gain = (close_day_before - close_two_days_before) / close_two_days_before * 100
+                gain_dict[symbol] = gain
+                
+                # 计算前天振幅
+                amplitude = (high_day_before - low_day_before) / low_day_before * 100
+                amplitude_dict[symbol] = amplitude
+                
+                # 存储昨天数据
+                open_yesterday_dict[symbol] = open_yesterday
+                close_yesterday_dict[symbol] = close_yesterday
+                
                 ohlcv_cache[symbol] = ohlcv
             else:
-                print(f"⚠️ {symbol} K线数据不足，跳过")
+                gain_dict[symbol] = -999
+                amplitude_dict[symbol] = 0
             
-            if (i + 1) % 10 == 0:
-                print(f"   进度: {i+1}/{len(top_gainer_symbols)}")
+            if (i + 1) % 50 == 0:
+                print(f"   进度: {i+1}/{len(swap_symbols)}")
             
             time.sleep(0.2)
         except Exception as e:
-            print(f"⚠️ 获取 {symbol} K线数据失败: {e}")
+            print(f"⚠️ {symbol} 获取失败: {e}")
+            gain_dict[symbol] = -999
+            amplitude_dict[symbol] = 0
             time.sleep(0.5)
     
-    # ========== 第三步：分析符合条件的币种 ==========
+    # ========== 第三步：按前天涨幅排序，取前 TOP_GAINERS 名 ==========
+    sorted_by_gain = sorted(gain_dict.items(), key=lambda x: x[1], reverse=True)
+    top_gainer_symbols = [sym for sym, gain in sorted_by_gain[:TOP_GAINERS] if gain > -999]
+    
+    print(f"✅ 前天涨幅榜筛选完成，取前 {len(top_gainer_symbols)} 名")
+    print(f"📊 前天涨幅榜前10名：")
+    for i, (sym, gain) in enumerate(sorted_by_gain[:10], 1):
+        print(f"   {i}. {sym.replace('/USDT:USDT', '')} 前天涨幅: {gain:.2f}%")
+    
+    # ========== 第四步：筛选昨天收跌的币种 ==========
     result_list = []
     
     for symbol in top_gainer_symbols:
-        try:
-            ohlcv = ohlcv_cache.get(symbol)
-            if not ohlcv or len(ohlcv) < 6:
-                continue
-            
-            # 索引说明：
-            # [-1] = 今天（未完整）
-            # [-2] = 昨天
-            # [-3] = 前天
-            # [-4] = 大前天
-            
-            # 大前天数据（索引-4）
-            high_two_days_before = ohlcv[-4][2]   # 大前天最高价
-            
-            # 前天数据（索引-3）
-            high_day_before = ohlcv[-3][2]   # 前天最高价
-            low_day_before = ohlcv[-3][3]    # 前天最低价
-            close_day_before = ohlcv[-3][4]  # 前天收盘价
-            
-            # 昨天数据（索引-2）
-            open_yesterday = ohlcv[-2][1]    # 昨天开盘价
-            close_yesterday = ohlcv[-2][4]   # 昨天收盘价
-            
-            # 计算前天振幅
-            amplitude_day_before = (high_day_before - low_day_before) / low_day_before * 100
-            
-            # 条件1：前天振幅 > MIN_AMPLITUDE
-            condition_amplitude = amplitude_day_before >= MIN_AMPLITUDE
-            
-            # 条件2：前天收盘 > 大前天最高（突破前高）
-            condition_breakout = close_day_before > high_two_days_before
-            
-            # 条件3：昨天收跌
-            condition_red = close_yesterday < open_yesterday
-            
-            if condition_amplitude and condition_breakout and condition_red:
-                # 获取该币种的24h涨幅（用于显示）
-                ticker = usdt_swap_tickers.get(symbol, {})
-                daily_gain = ticker.get('percentage', 0)
-                
-                result_list.append({
-                    'symbol': symbol.replace('/USDT:USDT', '').replace('/USDT', ''),
-                    'amplitude': round(amplitude_day_before, 2),
-                    'daily_gain': round(daily_gain, 2),
-                    'close_day_before': round(close_day_before, 4),
-                    'high_two_days_before': round(high_two_days_before, 4),
-                    'close_yesterday': round(close_yesterday, 4),
-                })
-                print(f"✓ {symbol} 前天振幅{amplitude_day_before:.2f}%，突破前高，昨日收跌")
-            
-            time.sleep(0.1)
-        except Exception as e:
-            print(f"⚠️ 分析 {symbol} 时出错: {e}")
+        open_yest = open_yesterday_dict.get(symbol)
+        close_yest = close_yesterday_dict.get(symbol)
+        
+        if open_yest is None or close_yest is None:
             continue
+        
+        # 判断昨天是否收跌
+        is_red = close_yest < open_yest
+        
+        if is_red:
+            result_list.append({
+                'symbol': symbol.replace('/USDT:USDT', '').replace('/USDT', ''),
+                'gain': round(gain_dict[symbol], 2),
+                'amplitude': round(amplitude_dict[symbol], 2),
+                'open_yest': round(open_yest, 4),
+                'close_yest': round(close_yest, 4),
+            })
+            print(f"✓ {symbol} 前天涨幅{gain_dict[symbol]:.2f}%，振幅{amplitude_dict[symbol]:.2f}%，昨日收跌")
     
-    # 按前天振幅排序，取前 PUSH_TOP_N 名
+    # ========== 第五步：按前天振幅排序，取前 PUSH_TOP_N 名 ==========
     result_list.sort(key=lambda x: x['amplitude'], reverse=True)
     top_results = result_list[:PUSH_TOP_N]
     
-    # ========== 生成推送消息 ==========
+    # ========== 第六步：生成推送消息 ==========
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 合约扫描 - 振幅突破+回调版",
+        f"📊 Bitget 合约扫描 - 前天涨幅榜前{TOP_GAINERS}名 + 昨日收跌",
         f"🕘 时间：{current_time}（北京时间）",
-        f"📈 条件：前天振幅 > {MIN_AMPLITUDE}% + 前天收盘突破前高 + 昨日收跌",
-        f"📋 筛选范围：24h涨幅榜前{TOP_GAINERS}名",
+        f"📈 排序：按前天K棒振幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     
     if top_results:
-        msg_lines.append(f"📋 按前天振幅排名 Top {len(top_results)}：")
+        msg_lines.append(f"📋 推送前十名：")
         for idx, item in enumerate(top_results, 1):
             msg_lines.append(
                 f"{idx}. {item['symbol']}\n"
-                f"   24h涨幅: +{item['daily_gain']}%\n"
+                f"   前天涨幅: +{item['gain']}%\n"
                 f"   前天振幅: ±{item['amplitude']}%\n"
-                f"   前天收盘: {item['close_day_before']}\n"
-                f"   突破前高: {item['high_two_days_before']} → 被突破\n"
-                f"   昨天收盘: {item['close_yesterday']} 📉"
+                f"   昨天: {item['open_yest']} → {item['close_yest']} 📉"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：前天大振幅突破前高，昨日回调，可能提供二次入场机会")
+        msg_lines.append("💡 解读：前天强势上涨，昨日回调，可关注后续走势")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
@@ -202,7 +190,7 @@ def main():
     print(message)
     print("="*50)
     
-    # ========== 第四步：推送消息 ==========
+    # ========== 第七步：推送消息 ==========
     send_push_wxpusher(message)
 
 if __name__ == "__main__":
