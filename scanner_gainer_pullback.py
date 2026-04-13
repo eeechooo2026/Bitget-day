@@ -9,7 +9,8 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-TOP_VOLUME = 100           # 按前天成交量取前N个合约
+TOP_VOLUME = 200           # 成交量粗筛：取前200个
+TOP_GAINERS = 50           # 涨幅精筛：取前50个
 MIN_AMPLITUDE = 10.0       # 前天最小振幅（百分比）
 PUSH_TOP_N = 10            # 推送前N名
 # =============================================
@@ -77,41 +78,67 @@ def main():
         print("❌ 未找到合约交易对")
         return
     
-    scan_symbols = swap_symbols[:TOP_VOLUME * 2]
-    print(f"📋 将扫描 {len(scan_symbols)} 个合约获取成交量数据")
-    
-    # ========== 获取成交量数据 ==========
-    print("⏳ 正在获取各合约前天成交量...")
+    # ========== 第一步：按成交量粗筛 ==========
+    print(f"⏳ 第一步：按日成交量筛选前{TOP_VOLUME}个合约...")
     volume_dict = {}
     ohlcv_cache = {}
+    scan_candidates = swap_symbols[:TOP_VOLUME * 2]  # 多取一些备选
     
-    for i, symbol in enumerate(scan_symbols):
+    for i, symbol in enumerate(scan_candidates):
         try:
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=6)
             if len(ohlcv) >= 5:
-                volume_day_before = ohlcv[-3][5]
-                volume_dict[symbol] = volume_day_before
+                volume = ohlcv[-3][5]  # 前天成交量
+                volume_dict[symbol] = volume
                 ohlcv_cache[symbol] = ohlcv
             else:
                 volume_dict[symbol] = 0
             
             if (i + 1) % 20 == 0:
-                print(f"   进度: {i+1}/{len(scan_symbols)}")
+                print(f"   进度: {i+1}/{len(scan_candidates)}")
             
             time.sleep(0.2)
         except Exception as e:
-            print(f"⚠️ 获取 {symbol} 数据失败: {e}")
+            print(f"⚠️ 获取 {symbol} 成交量失败: {e}")
             volume_dict[symbol] = 0
             time.sleep(0.5)
     
     sorted_by_volume = sorted(volume_dict.items(), key=lambda x: x[1], reverse=True)
     top_volume_symbols = [sym for sym, vol in sorted_by_volume[:TOP_VOLUME] if vol > 0]
-    print(f"✅ 按成交量筛选完成，取前 {len(top_volume_symbols)} 个")
+    print(f"✅ 成交量粗筛完成，取前 {len(top_volume_symbols)} 个")
     
-    # ========== 分析振幅、突破和回调 ==========
-    result_list = []
+    # ========== 第二步：按前天涨幅精筛 ==========
+    print(f"⏳ 第二步：从前{TOP_VOLUME}个中按前天涨幅取前{TOP_GAINERS}名...")
+    gain_dict = {}
     
     for symbol in top_volume_symbols:
+        try:
+            ohlcv = ohlcv_cache.get(symbol)
+            if not ohlcv or len(ohlcv) < 5:
+                ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=6)
+                if len(ohlcv) < 5:
+                    gain_dict[symbol] = -999
+                    continue
+                ohlcv_cache[symbol] = ohlcv
+            
+            close_day_before = ohlcv[-3][4]      # 前天收盘价
+            close_two_days_before = ohlcv[-4][4] # 大前天收盘价
+            gain = (close_day_before - close_two_days_before) / close_two_days_before * 100
+            gain_dict[symbol] = gain
+            
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"⚠️ 获取 {symbol} 涨幅失败: {e}")
+            gain_dict[symbol] = -999
+    
+    sorted_by_gain = sorted(gain_dict.items(), key=lambda x: x[1], reverse=True)
+    top_gainer_symbols = [sym for sym, gain in sorted_by_gain[:TOP_GAINERS] if gain > -999]
+    print(f"✅ 涨幅精筛完成，将分析前 {len(top_gainer_symbols)} 个涨幅榜币种")
+    
+    # ========== 第三步：分析符合条件的币种 ==========
+    result_list = []
+    
+    for symbol in top_gainer_symbols:
         try:
             ohlcv = ohlcv_cache.get(symbol)
             if not ohlcv or len(ohlcv) < 6:
@@ -134,7 +161,7 @@ def main():
             # 计算前天振幅
             amplitude_day_before = (high_day_before - low_day_before) / low_day_before * 100
             
-            # 条件1：前天振幅 > 10%
+            # 条件1：前天振幅 > MIN_AMPLITUDE
             condition_amplitude = amplitude_day_before >= MIN_AMPLITUDE
             
             # 条件2：前天收盘 > 大前天最高（突破前高）
@@ -165,8 +192,9 @@ def main():
     current_date = datetime.now().strftime('%Y-%m-%d')
     msg_lines = [
         f"📊 Bitget 合约扫描 - 振幅突破+回调版",
-        f"🕘 时间：{current_date} 09:00（北京时间）",
+        f"🕘 时间：{current_date} 09:15（北京时间）",
         f"📈 条件：前天振幅>{MIN_AMPLITUDE}% + 前天收盘突破前高 + 昨日收跌",
+        f"📋 筛选范围：前天涨幅榜前{TOP_GAINERS}名",
         f"📋 按前天振幅排名 Top {len(top_results)}：",
         "━━━━━━━━━━━━━━━━━━━━"
     ]
