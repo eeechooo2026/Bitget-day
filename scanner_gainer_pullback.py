@@ -9,7 +9,6 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-MIN_LEVERAGE = 50          # 最低杠杆倍数要求
 PUSH_TOP_N = 10            # 推送前N名
 # =============================================
 
@@ -41,7 +40,7 @@ def send_push_wxpusher(message):
 def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"🚀 开始扫描 - 北京时间 {beijing_time}")
-    print(f"📋 筛选逻辑：杠杆 ≥ {MIN_LEVERAGE}倍 的 USDT 合约")
+    print(f"📋 筛选逻辑：所有 USDT 本位永续合约")
     print(f"📈 条件1：前天收阳 + 前天收盘突破前高")
     print(f"📈 条件2：前天放量（>1.5倍5日均量）+ 昨天缩量（<0.8倍5日均量）")
     print(f"📈 条件3：回调不破20日均线（趋势确认）")
@@ -56,7 +55,7 @@ def main():
         },
     })
     
-    # ========== 第一步：获取所有合约及杠杆信息 ==========
+    # ========== 第一步：获取所有合约 ==========
     print("📡 正在加载合约市场数据...")
     try:
         markets = exchange.load_markets()
@@ -65,46 +64,29 @@ def main():
         print(f"❌ 加载市场数据失败: {e}")
         return
     
-    # 筛选符合条件的合约：USDT本位 + 杠杆≥50
-    qualified_symbols = []
-    symbol_info = {}
-    
+    # 筛选 USDT 本位永续合约
+    swap_symbols = []
     for symbol, market in markets.items():
-        # 筛选 USDT 本位永续合约
         if market.get('type') == 'swap' and symbol.endswith('/USDT:USDT'):
-            # 获取该合约的最大杠杆
-            max_leverage = 0
-            
-            # 尝试从不同字段获取杠杆信息
-            if 'limits' in market and 'leverage' in market['limits'] and 'max' in market['limits']['leverage']:
-                max_leverage = float(market['limits']['leverage']['max'])
-            elif 'info' in market and 'maxLeverage' in market['info']:
-                max_leverage = float(market['info']['maxLeverage'])
-            elif 'leverage' in market:
-                max_leverage = float(market['leverage']) if isinstance(market['leverage'], (int, float)) else 0
-            
-            if max_leverage >= MIN_LEVERAGE:
-                qualified_symbols.append(symbol)
-                symbol_info[symbol] = {'max_leverage': max_leverage}
+            swap_symbols.append(symbol)
     
-    print(f"✅ 杠杆筛选完成：共 {len(qualified_symbols)} 个合约满足杠杆 ≥ {MIN_LEVERAGE}倍")
+    print(f"📊 共找到 {len(swap_symbols)} 个 USDT 本位合约")
     
-    if len(qualified_symbols) == 0:
-        print("❌ 未找到符合条件的合约交易对")
+    if len(swap_symbols) == 0:
+        print("❌ 未找到合约交易对")
         return
     
-    # 打印前20个符合条件的合约（用于调试）
-    print(f"📊 符合条件的合约示例（前20个）：")
-    for i, sym in enumerate(qualified_symbols[:20], 1):
-        lev = symbol_info[sym]['max_leverage']
-        print(f"   {i}. {sym.replace('/USDT:USDT', '')} 最大杠杆: {lev}倍")
+    # 打印前20个合约（用于调试）
+    print(f"📊 合约示例（前20个）：")
+    for i, sym in enumerate(swap_symbols[:20], 1):
+        print(f"   {i}. {sym.replace('/USDT:USDT', '')}")
     
     # ========== 第二步：获取K线数据进行分析 ==========
-    print(f"⏳ 正在遍历 {len(qualified_symbols)} 个合约，获取K线数据...")
+    print(f"⏳ 正在遍历 {len(swap_symbols)} 个合约，获取K线数据...")
     
     result_list = []
     
-    for i, symbol in enumerate(qualified_symbols):
+    for i, symbol in enumerate(swap_symbols):
         try:
             # 获取足够多的K线数据（需要至少21根日线计算20日均线）
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=30)
@@ -160,7 +142,6 @@ def main():
                 result_list.append({
                     'symbol': symbol.replace('/USDT:USDT', '').replace('/USDT', ''),
                     'amplitude': round(amplitude_day_before, 2),
-                    'leverage': symbol_info[symbol]['max_leverage'],
                     'ma20': round(ma20, 4),
                     'low_yesterday': round(low_yesterday, 4),
                     'volume_ratio_up': round(volume_day_before / avg_volume_5, 2),
@@ -174,7 +155,7 @@ def main():
                 print(f"✓ {symbol} 前天突破前高+放量+{amplitude_day_before:.2f}%振幅，昨日缩量回调至MA20上方收跌")
             
             if (i + 1) % 20 == 0:
-                print(f"   进度: {i+1}/{len(qualified_symbols)}")
+                print(f"   进度: {i+1}/{len(swap_symbols)}")
             
             time.sleep(0.2)
         except Exception as e:
@@ -188,7 +169,7 @@ def main():
     # ========== 第四步：生成推送消息 ==========
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 合约扫描 - 杠杆≥{MIN_LEVERAGE}倍",
+        f"📊 Bitget 合约扫描 - 所有USDT本位永续合约",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 筛选条件：",
         f"   • 前天收阳 + 收盘突破前高",
@@ -202,7 +183,7 @@ def main():
         msg_lines.append(f"📋 推送前十名（共{len(result_list)}个符合条件的币种）：")
         for idx, item in enumerate(top_results, 1):
             msg_lines.append(
-                f"{idx}. {item['symbol']} (杠杆:{item['leverage']}x)\n"
+                f"{idx}. {item['symbol']}\n"
                 f"   前天振幅: ±{item['amplitude']}%\n"
                 f"   前天: {item['open_day_before']} → {item['close_day_before']} 📈 (放量{item['volume_ratio_up']}倍)\n"
                 f"   突破前高: {item['high_two_days_before']} → {item['close_day_before']}\n"
