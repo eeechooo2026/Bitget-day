@@ -9,9 +9,9 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-TOP_GAINERS = 50           # 按24h涨幅取前N个合约
 PUSH_TOP_N = 10            # 推送前N名
-TIMEFRAME = '4h'           # K线周期
+TIMEFRAME_4H = '4h'        # 4小时K线周期
+TIMEFRAME_1D = '1d'        # 日线K线周期
 # =============================================
 
 def send_push_wxpusher(message):
@@ -41,10 +41,10 @@ def send_push_wxpusher(message):
 
 def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"🚀 开始4小时K线扫描 - 北京时间 {beijing_time}")
-    print(f"📋 筛选范围：24h涨幅榜前{TOP_GAINERS}名")
+    print(f"🚀 开始双周期突破回调扫描 - 北京时间 {beijing_time}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上上根4小时K棒收阳 + 收盘突破上上上根最高价")
+    print(f"   • 昨天日线收阳 + 收盘价 > 前天最高价（日线突破前高）")
+    print(f"   • 上上根4小时K棒收阳 + 收盘价 > 上上上根最高价（4小时突破前高）")
     print(f"   • 上根4小时K棒收跌（回调确认）")
     print(f"📊 排序：按上上根K棒振幅从高到低")
     
@@ -56,133 +56,161 @@ def main():
         },
     })
     
-    # ========== 第一步：获取24h涨幅榜前50名 ==========
-    print("📡 正在获取所有合约的24h涨幅数据...")
+    # ========== 第一步：获取所有USDT本位永续合约 ==========
+    print("📡 正在加载合约市场数据...")
     try:
-        tickers = exchange.fetch_tickers()
-        print(f"📊 共获取 {len(tickers)} 个交易对数据")
+        markets = exchange.load_markets()
+        print(f"📊 共加载 {len(markets)} 个交易对")
     except Exception as e:
-        print(f"❌ 获取市场数据失败: {e}")
+        print(f"❌ 加载市场数据失败: {e}")
         return
     
     # 筛选 USDT 本位永续合约
-    usdt_swap_tickers = {}
-    for symbol, ticker in tickers.items():
-        if '/USDT:USDT' in symbol and ticker.get('percentage') is not None:
-            usdt_swap_tickers[symbol] = ticker
+    swap_symbols = []
+    for symbol, market in markets.items():
+        if market.get('type') == 'swap' and symbol.endswith('/USDT:USDT'):
+            swap_symbols.append(symbol)
     
-    # 按24h涨跌幅排序，取前 TOP_GAINERS 名
-    sorted_by_gain = sorted(
-        usdt_swap_tickers.items(),
-        key=lambda x: x[1]['percentage'],
-        reverse=True
-    )
-    top_gainer_symbols = [sym for sym, _ in sorted_by_gain[:TOP_GAINERS]]
+    print(f"📊 共找到 {len(swap_symbols)} 个 USDT 本位合约")
     
-    print(f"✅ 涨幅榜筛选完成，取前 {len(top_gainer_symbols)} 个")
+    if len(swap_symbols) == 0:
+        print("❌ 未找到合约交易对")
+        return
     
-    # 打印涨幅榜前10名（用于调试）
-    print(f"📊 24h涨幅榜前10名：")
-    for i, (sym, ticker) in enumerate(sorted_by_gain[:10], 1):
-        gain = ticker['percentage']
-        print(f"   {i}. {sym.replace('/USDT:USDT', '')} 24h涨幅: {gain:.2f}%")
+    # ========== 第二步：获取日线数据判断突破前高 ==========
+    print(f"⏳ 正在获取日线数据，判断昨天日线是否突破前天最高价...")
+    daily_breakout_symbols = []
+    ohlcv_4h_cache = {}
     
-    # ========== 第二步：获取4小时K线数据 ==========
-    print(f"⏳ 正在获取涨幅榜前{TOP_GAINERS}名币种的4小时K线数据...")
-    ohlcv_cache = {}
-    
-    for i, symbol in enumerate(top_gainer_symbols):
+    for i, symbol in enumerate(swap_symbols):
         try:
-            # 获取4根已收盘的4小时K线（足够分析上上上根、上上根、上根）
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=4)
-            if len(ohlcv) >= 4:
-                ohlcv_cache[symbol] = ohlcv
-            else:
-                print(f"⚠️ {symbol} K线数据不足，跳过")
+            # 获取最近4根日线（大前天、前天、昨天、今天）
+            ohlcv_daily = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=4)
+            if len(ohlcv_daily) < 4:
+                continue
             
-            if (i + 1) % 10 == 0:
-                print(f"   进度: {i+1}/{len(top_gainer_symbols)}")
+            # 前天数据（索引1）
+            high_day_before = ohlcv_daily[1][2]   # 前天最高价
+            close_day_before = ohlcv_daily[1][4]  # 前天收盘价
+            
+            # 昨天数据（索引2）
+            open_yesterday = ohlcv_daily[2][1]    # 昨天开盘价
+            close_yesterday = ohlcv_daily[2][4]   # 昨天收盘价
+            
+            # 条件1：昨天是否收阳
+            is_bullish = close_yesterday > open_yesterday
+            
+            # 条件2：昨天收盘是否突破前天最高价
+            is_breakout = close_yesterday > high_day_before
+            
+            if is_bullish and is_breakout:
+                daily_breakout_symbols.append(symbol)
+                print(f"✓ {symbol} 昨天日线收阳+突破前天最高{high_day_before:.4f}")
+            
+            if (i + 1) % 50 == 0:
+                print(f"   进度: {i+1}/{len(swap_symbols)}")
             
             time.sleep(0.2)
         except Exception as e:
-            print(f"⚠️ 获取 {symbol} K线数据失败: {e}")
+            print(f"⚠️ 获取 {symbol} 日线数据失败: {e}")
             time.sleep(0.5)
     
-    # ========== 第三步：分析符合条件的币种 ==========
+    print(f"✅ 日线筛选完成：共 {len(daily_breakout_symbols)} 个币种满足日线突破前高")
+    
+    if len(daily_breakout_symbols) == 0:
+        print("❌ 未找到满足日线突破前高的币种")
+        return
+    
+    # ========== 第三步：获取4小时K线数据 ==========
+    print(f"⏳ 正在获取4小时K线数据...")
+    
+    for i, symbol in enumerate(daily_breakout_symbols):
+        try:
+            # 获取足够多的4小时K线（至少需要5根）
+            ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=10)
+            if len(ohlcv_4h) >= 5:
+                ohlcv_4h_cache[symbol] = ohlcv_4h
+            else:
+                print(f"⚠️ {symbol} 4小时K线数据不足，跳过")
+            
+            if (i + 1) % 20 == 0:
+                print(f"   进度: {i+1}/{len(daily_breakout_symbols)}")
+            
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"⚠️ 获取 {symbol} 4小时K线数据失败: {e}")
+            time.sleep(0.5)
+    
+    # ========== 第四步：分析4小时级别突破和回调 ==========
     result_list = []
     
-    for symbol in top_gainer_symbols:
+    for symbol in daily_breakout_symbols:
         try:
-            ohlcv = ohlcv_cache.get(symbol)
-            if not ohlcv or len(ohlcv) < 4:
+            ohlcv = ohlcv_4h_cache.get(symbol)
+            if not ohlcv or len(ohlcv) < 5:
                 continue
             
-            # 索引说明（按时间从旧到新，limit=4，全部已收盘）：
-            # ohlcv[0] = 上上上根（最旧）
-            # ohlcv[1] = 上上根
-            # ohlcv[2] = 上根
-            # ohlcv[3] = 当前K线的前一根（不使用，因为策略只用上上根和上根）
+            # 索引说明（按时间从旧到新）：
+            # ohlcv[-5] = 更早的K线（用于判断上上根的突破）
+            # ohlcv[-4] = 上上上根（提供突破参考高点）
+            # ohlcv[-3] = 上上根（核心判断：是否收阳+突破前高+振幅）
+            # ohlcv[-2] = 上根（判断是否收跌）
+            # ohlcv[-1] = 当前K线（未完全确定，不参与判断）
             
-            # ===== 上上上根数据（索引0）=====
-            high_prev3 = ohlcv[0][2]   # 上上上根最高价（突破参考点）
+            # 上上上根数据（索引-4）
+            high_prev3 = ohlcv[-4][2]   # 上上上根最高价（突破参考点）
             
-            # ===== 上上根数据（索引1）- 核心判断 =====
-            open_prev2 = ohlcv[1][1]   # 上上根开盘价
-            close_prev2 = ohlcv[1][4]  # 上上根收盘价
-            high_prev2 = ohlcv[1][2]   # 上上根最高价
-            low_prev2 = ohlcv[1][3]    # 上上根最低价
+            # 上上根数据（索引-3）
+            open_prev2 = ohlcv[-3][1]   # 上上根开盘价
+            close_prev2 = ohlcv[-3][4]  # 上上根收盘价
+            high_prev2 = ohlcv[-3][2]   # 上上根最高价
+            low_prev2 = ohlcv[-3][3]    # 上上根最低价
             
-            # ===== 上根数据（索引2）- 回调确认 =====
-            open_prev1 = ohlcv[2][1]   # 上根开盘价
-            close_prev1 = ohlcv[2][4]  # 上根收盘价
+            # 上根数据（索引-2）
+            open_prev1 = ohlcv[-2][1]   # 上根开盘价
+            close_prev1 = ohlcv[-2][4]  # 上根收盘价
             
             # 条件1：上上根是否收阳
-            is_bullish_prev2 = close_prev2 > open_prev2
+            is_bullish_4h = close_prev2 > open_prev2
             
             # 条件2：上上根收盘是否突破上上上根最高价
-            is_breakout = close_prev2 > high_prev3
+            is_breakout_4h = close_prev2 > high_prev3
             
-            # 条件3：上根是否收跌（回调确认）
-            is_red_prev1 = close_prev1 < open_prev1
+            # 条件3：上根是否收跌
+            is_red = close_prev1 < open_prev1
             
             # 计算上上根振幅
-            amplitude_prev2 = (high_prev2 - low_prev2) / low_prev2 * 100
+            amplitude = (high_prev2 - low_prev2) / low_prev2 * 100
             
-            if is_bullish_prev2 and is_breakout and is_red_prev1:
-                # 获取该币种的24h涨幅（用于显示）
-                ticker = usdt_swap_tickers.get(symbol, {})
-                daily_gain = ticker.get('percentage', 0)
-                
+            if is_bullish_4h and is_breakout_4h and is_red:
                 result_list.append({
                     'symbol': symbol.replace('/USDT:USDT', '').replace('/USDT', ''),
-                    'amplitude': round(amplitude_prev2, 2),
-                    'daily_gain': round(daily_gain, 2),
-                    'open_prev2': round(open_prev2, 4),
+                    'amplitude': round(amplitude, 2),
                     'close_prev2': round(close_prev2, 4),
                     'high_prev3': round(high_prev3, 4),
                     'open_prev1': round(open_prev1, 4),
                     'close_prev1': round(close_prev1, 4),
                 })
-                print(f"✓ {symbol} 上上根收阳+突破前高+{amplitude_prev2:.2f}%振幅，上根收跌")
+                print(f"✓ {symbol} 上上根收阳+突破前高+{amplitude:.2f}%振幅，上根收跌")
             
             time.sleep(0.1)
         except Exception as e:
-            print(f"⚠️ 分析 {symbol} 时出错: {e}")
+            print(f"⚠️ 分析 {symbol} 4小时K线时出错: {e}")
             continue
     
-    # ========== 第四步：按上上根振幅排序，取前十 ==========
+    # ========== 第五步：按上上根振幅排序，取前十 ==========
     result_list.sort(key=lambda x: x['amplitude'], reverse=True)
     top_results = result_list[:PUSH_TOP_N]
     
-    # ========== 第五步：生成推送消息 ==========
+    # ========== 第六步：生成推送消息 ==========
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时K线扫描 - 突破回调版",
+        f"📊 Bitget 双周期突破回调扫描",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上上根4小时K棒收阳 + 收盘突破上上上根最高价",
+        f"   • 昨天日线收阳 + 收盘价 > 前天最高价（日线突破）",
+        f"   • 上上根4小时K棒收阳 + 收盘价 > 上上上根最高价（4小时突破）",
         f"   • 上根4小时K棒收跌（回调确认）",
-        f"📋 筛选范围：24h涨幅榜前{TOP_GAINERS}名",
         f"📊 排序：按上上根K棒振幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -192,15 +220,13 @@ def main():
         for idx, item in enumerate(top_results, 1):
             msg_lines.append(
                 f"{idx}. {item['symbol']}\n"
-                f"   24h涨幅: +{item['daily_gain']}%\n"
                 f"   上上根振幅: ±{item['amplitude']}%\n"
-                f"   上上根: {item['open_prev2']} → {item['close_prev2']} 📈\n"
-                f"   突破前高: {item['high_prev3']} → {item['close_prev2']}\n"
-                f"   上根: {item['open_prev1']} → {item['close_prev1']} 📉"
+                f"   上上根突破前高: {item['high_prev3']} → {item['close_prev2']} 📈\n"
+                f"   上根收跌: {item['open_prev1']} → {item['close_prev1']} 📉"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：上上根突破前高后上涨，上根回调，关注上根低点支撑")
+        msg_lines.append("💡 解读：日线+4小时双周期突破前高，上根回调提供入场机会")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
@@ -211,7 +237,7 @@ def main():
     print(message)
     print("="*50)
     
-    # ========== 第六步：推送消息 ==========
+    # ========== 第七步：推送消息 ==========
     send_push_wxpusher(message)
 
 if __name__ == "__main__":
