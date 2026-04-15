@@ -70,7 +70,7 @@ def main():
     print(f"🚀 开始日线扫描 - 北京时间 {beijing_time}")
     print(f"📈 策略逻辑：")
     print(f"   • 昨天日线收阳 + 收盘价 > 前天最高价（日线突破前高）")
-    print(f"   • 04:00-07:00四小时K棒震荡：收盘价 < 00:00-03:00四小时K棒最高价")
+    print(f"   • 08:00-11:00四小时K棒震荡：收盘价 < 04:00-07:00四小时K棒最高价")
     print(f"📊 排序：按昨日日线振幅从高到低")
     
     # 初始化 Bitget 合约接口
@@ -157,8 +157,8 @@ def main():
         print("❌ 未找到满足日线突破前高的币种")
         return
     
-    # ========== 第三步：获取4小时K线数据，判断04:00-07:00时段是否震荡 ==========
-    print(f"⏳ 正在获取4小时K线数据，判断04:00-07:00时段震荡...")
+    # ========== 第三步：获取4小时K线数据，判断08:00-11:00时段是否震荡 ==========
+    print(f"⏳ 正在获取4小时K线数据，判断08:00-11:00时段震荡...")
     result_list = []
     
     for symbol, daily_data in daily_data_cache.items():
@@ -169,10 +169,9 @@ def main():
                 print(f"⚠️ {symbol} 4小时K线数据不足，跳过")
                 continue
             
-            # 遍历4小时K线，找到昨天对应的00:00-03:00和04:00-07:00时段
-            # 注意：我们需要的是昨天的这两个时段
-            target_00_03_high = None
-            target_04_07_close = None
+            # 遍历4小时K线，找到昨天对应的04:00-07:00和08:00-11:00时段
+            target_04_07_high = None
+            target_08_11_close = None
             
             for kline in ohlcv_4h:
                 # 获取K线时间（UTC），转换为北京时间
@@ -190,14 +189,14 @@ def main():
                 
                 period = get_4h_period_label(beijing_hour)
                 
-                if period == "00:00-03:00":
-                    target_00_03_high = kline[2]  # 最高价
-                elif period == "04:00-07:00":
-                    target_04_07_close = kline[4]  # 收盘价
+                if period == "04:00-07:00":
+                    target_04_07_high = kline[2]  # 最高价
+                elif period == "08:00-11:00":
+                    target_08_11_close = kline[4]  # 收盘价
             
-            # 判断震荡条件：04:00-07:00收盘价 < 00:00-03:00最高价
-            if target_00_03_high is not None and target_04_07_close is not None:
-                is_consolidation = target_04_07_close < target_00_03_high
+            # 判断震荡条件：08:00-11:00收盘价 < 04:00-07:00最高价
+            if target_04_07_high is not None and target_08_11_close is not None:
+                is_consolidation = target_08_11_close < target_04_07_high
                 
                 if is_consolidation:
                     result_list.append({
@@ -205,10 +204,10 @@ def main():
                         'amplitude': round(daily_data['amplitude'], 2),
                         'close_yesterday': round(daily_data['close_yesterday'], 4),
                         'high_day_before': round(daily_data['high_day_before'], 4),
-                        'high_00_03': round(target_00_03_high, 4),
-                        'close_04_07': round(target_04_07_close, 4),
+                        'high_04_07': round(target_04_07_high, 4),
+                        'close_08_11': round(target_08_11_close, 4),
                     })
-                    print(f"✓ {symbol} 04:00-07:00收盘{target_04_07_close:.4f} < 00:00-03:00最高{target_00_03_high:.4f}，符合震荡条件")
+                    print(f"✓ {symbol} 08:00-11:00收盘{target_08_11_close:.4f} < 04:00-07:00最高{target_04_07_high:.4f}，符合震荡条件")
             else:
                 print(f"⚠️ {symbol} 缺少昨日特定时段数据")
             
@@ -228,7 +227,7 @@ def main():
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 昨天日线收阳 + 收盘价 > 前天最高价（日线突破）",
-        f"   • 04:00-07:00四小时K棒震荡：收盘价 < 00:00-03:00四小时K棒最高价",
+        f"   • 08:00-11:00四小时K棒震荡：收盘价 < 04:00-07:00四小时K棒最高价",
         f"📊 排序：按昨日日线振幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -241,11 +240,11 @@ def main():
                 f"   昨日振幅: ±{item['amplitude']}%\n"
                 f"   昨日收盘: {item['close_yesterday']}\n"
                 f"   突破前高: {item['high_day_before']} → {item['close_yesterday']} 📈\n"
-                f"   04-07震荡: 最高{item['high_00_03']} > 收盘{item['close_04_07']}"
+                f"   08-11震荡: 最高{item['high_04_07']} > 收盘{item['close_08_11']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：日线突破前高，次日凌晨震荡整理，关注后续方向选择")
+        msg_lines.append("💡 解读：日线突破前高，上午时段震荡整理，关注后续方向选择")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
