@@ -1,4 +1,4 @@
-name: Bitget 合约扫描 - 趋势+量能版
+name: Bitget 日线突破+4小时震荡扫描
 
 on:
   schedule:
@@ -15,5 +15,5 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install -r requirements.txt
-      - name: Run scan
+      - name: Run daily breakout scan
         run: python scanner_gainer_pullback.py
