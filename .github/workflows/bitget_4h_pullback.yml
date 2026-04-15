@@ -1,10 +1,9 @@
-name: Bitget 双周期突破回调扫描
+name: Bitget 日线突破+4小时震荡扫描
 
 on:
   schedule:
-    # 北京时间 8:01, 12:01, 16:01, 20:01, 00:01
-    # 对应 UTC 0:01, 4:01, 8:01, 12:01, 16:01
-    - cron: '1 0,4,8,12,16 * * *'
+    # 北京时间 9:15 = UTC 1:15
+    - cron: '15 1 * * *'
   workflow_dispatch:
 
 jobs:
@@ -16,5 +15,5 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install -r requirements.txt
-      - name: Run double timeframe breakout scan
-        run: python scanner_4h_pullback.py
+      - name: Run daily breakout scan
+        run: python scanner_gainer_pullback.py
