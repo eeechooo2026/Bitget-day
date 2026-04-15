@@ -1,4 +1,4 @@
-name: Bitget 4小时K线扫描 - 突破回调版
+name: Bitget 双周期突破回调扫描
 
 on:
   schedule:
@@ -16,5 +16,5 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install -r requirements.txt
-      - name: Run 4-hour pullback scan
+      - name: Run double timeframe breakout scan
         run: python scanner_4h_pullback.py
