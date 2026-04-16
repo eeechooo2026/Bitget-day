@@ -44,8 +44,8 @@ def main():
     print(f"🚀 开始日线突破+4小时震荡扫描 - 北京时间 {beijing_time}")
     print(f"📈 策略逻辑：")
     print(f"   • 昨天日线收阳 + 收盘价 > 前天最高价（日线突破前高）")
-    print(f"   • 上根4小时K棒震荡：收盘价 < 上上根最高价 且 收盘价 > 上上根最低价")
-    print(f"📊 排序：按昨日日线振幅从高到低")
+    print(f"   • 上根4小时K棒震荡：收盘价介于上上根高低点之间")
+    print(f"📊 排序：按24小时涨幅从高到低")
     
     # 初始化 Bitget 合约接口
     exchange = ccxt.bitget({
@@ -76,7 +76,22 @@ def main():
         print("❌ 未找到合约交易对")
         return
     
-    # ========== 第二步：获取日线数据判断突破前高 ==========
+    # ========== 第二步：获取24h涨幅数据 ==========
+    print("📡 正在获取所有合约的24h涨幅数据...")
+    try:
+        tickers = exchange.fetch_tickers()
+        print(f"📊 共获取 {len(tickers)} 个交易对数据")
+    except Exception as e:
+        print(f"❌ 获取市场数据失败: {e}")
+        return
+    
+    # 构建24h涨幅字典
+    daily_gain_dict = {}
+    for symbol, ticker in tickers.items():
+        if '/USDT:USDT' in symbol and ticker.get('percentage') is not None:
+            daily_gain_dict[symbol] = ticker['percentage']
+    
+    # ========== 第三步：获取日线数据判断突破前高 ==========
     print(f"⏳ 正在获取日线数据...")
     daily_data_cache = {}
     
@@ -89,7 +104,6 @@ def main():
             
             # 前天数据（索引1）
             high_day_before = ohlcv_daily[1][2]   # 前天最高价
-            close_day_before = ohlcv_daily[1][4]  # 前天收盘价
             
             # 昨天数据（索引2）
             open_yesterday = ohlcv_daily[2][1]    # 昨天开盘价
@@ -131,7 +145,7 @@ def main():
         print("❌ 未找到满足日线突破前高的币种")
         return
     
-    # ========== 第三步：获取4小时K线数据，判断上根是否震荡 ==========
+    # ========== 第四步：获取4小时K线数据，判断上根是否震荡 ==========
     print(f"⏳ 正在获取4小时K线数据，判断上根是否震荡...")
     result_list = []
     
@@ -163,8 +177,12 @@ def main():
             is_consolidation = is_below_high and is_above_low
             
             if is_consolidation:
+                # 获取24小时涨幅
+                daily_gain = daily_gain_dict.get(symbol, 0)
+                
                 result_list.append({
                     'symbol': symbol.replace('/USDT:USDT', '').replace('/USDT', ''),
+                    'daily_gain': round(daily_gain, 2),
                     'amplitude': round(daily_data['amplitude'], 2),
                     'close_yesterday': round(daily_data['close_yesterday'], 4),
                     'high_day_before': round(daily_data['high_day_before'], 4),
@@ -172,7 +190,7 @@ def main():
                     'low_prev2': round(low_prev2, 4),
                     'close_prev1': round(close_prev1, 4),
                 })
-                print(f"✓ {symbol} 上根收盘{close_prev1:.4f} 介于上上根[{low_prev2:.4f}-{high_prev2:.4f}]之间，符合震荡条件")
+                print(f"✓ {symbol} 24h涨幅{daily_gain:.2f}%，上根收盘{close_prev1:.4f}介于上上根区间内")
             else:
                 if not is_below_high:
                     print(f"   {symbol} 不符合震荡条件: 上根收盘{close_prev1:.4f} >= 上上根最高{high_prev2:.4f}")
@@ -184,11 +202,11 @@ def main():
             print(f"⚠️ 分析 {symbol} 4小时K线时出错: {e}")
             continue
     
-    # ========== 第四步：按昨日日线振幅排序，取前十 ==========
-    result_list.sort(key=lambda x: x['amplitude'], reverse=True)
+    # ========== 第五步：按24小时涨幅排序，取前十 ==========
+    result_list.sort(key=lambda x: x['daily_gain'], reverse=True)
     top_results = result_list[:PUSH_TOP_N]
     
-    # ========== 第五步：生成推送消息 ==========
+    # ========== 第六步：生成推送消息 ==========
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     msg_lines = [
         f"📊 Bitget 日线突破+4小时震荡扫描",
@@ -196,7 +214,7 @@ def main():
         f"📈 策略逻辑：",
         f"   • 昨天日线收阳 + 收盘价 > 前天最高价（日线突破）",
         f"   • 上根4小时K棒震荡：收盘价介于上上根高低点之间",
-        f"📊 排序：按昨日日线振幅从高到低",
+        f"📊 排序：按24小时涨幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     
@@ -205,6 +223,7 @@ def main():
         for idx, item in enumerate(top_results, 1):
             msg_lines.append(
                 f"{idx}. {item['symbol']}\n"
+                f"   24h涨幅: +{item['daily_gain']}%\n"
                 f"   昨日振幅: ±{item['amplitude']}%\n"
                 f"   昨日收盘: {item['close_yesterday']}\n"
                 f"   突破前高: {item['high_day_before']} → {item['close_yesterday']} 📈\n"
@@ -212,7 +231,7 @@ def main():
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：日线突破前高，上根4小时K线在区间内震荡，关注突破方向")
+        msg_lines.append("💡 解读：日线突破前高，上根4小时K线区间内震荡，关注突破方向")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
@@ -223,7 +242,7 @@ def main():
     print(message)
     print("="*50)
     
-    # ========== 第六步：推送消息 ==========
+    # ========== 第七步：推送消息 ==========
     send_push_wxpusher(message)
 
 if __name__ == "__main__":
