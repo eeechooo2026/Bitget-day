@@ -44,7 +44,7 @@ def main():
     print(f"🚀 开始日线突破+4小时震荡扫描 - 北京时间 {beijing_time}")
     print(f"📈 策略逻辑：")
     print(f"   • 昨天日线收阳 + 收盘价 > 前天最高价（日线突破前高）")
-    print(f"   • 上根4小时K棒震荡：收盘价 < 上上根4小时K棒最高价")
+    print(f"   • 上根4小时K棒震荡：收盘价 < 上上根最高价 且 收盘价 > 上上根最低价")
     print(f"📊 排序：按昨日日线振幅从高到低")
     
     # 初始化 Bitget 合约接口
@@ -150,12 +150,17 @@ def main():
             
             # 上上根数据（索引-3）
             high_prev2 = ohlcv_4h[-3][2]   # 上上根最高价
+            low_prev2 = ohlcv_4h[-3][3]    # 上上根最低价
             
             # 上根数据（索引-2）
             close_prev1 = ohlcv_4h[-2][4]  # 上根收盘价
             
-            # 判断震荡条件：上根收盘价 < 上上根最高价
-            is_consolidation = close_prev1 < high_prev2
+            # 判断震荡条件：
+            # 条件A：上根收盘价 < 上上根最高价
+            # 条件B：上根收盘价 > 上上根最低价
+            is_below_high = close_prev1 < high_prev2
+            is_above_low = close_prev1 > low_prev2
+            is_consolidation = is_below_high and is_above_low
             
             if is_consolidation:
                 result_list.append({
@@ -164,11 +169,15 @@ def main():
                     'close_yesterday': round(daily_data['close_yesterday'], 4),
                     'high_day_before': round(daily_data['high_day_before'], 4),
                     'high_prev2': round(high_prev2, 4),
+                    'low_prev2': round(low_prev2, 4),
                     'close_prev1': round(close_prev1, 4),
                 })
-                print(f"✓ {symbol} 上根收盘{close_prev1:.4f} < 上上根最高{high_prev2:.4f}，符合震荡条件")
+                print(f"✓ {symbol} 上根收盘{close_prev1:.4f} 介于上上根[{low_prev2:.4f}-{high_prev2:.4f}]之间，符合震荡条件")
             else:
-                print(f"   {symbol} 不符合震荡条件: 上根收盘{close_prev1:.4f} >= 上上根最高{high_prev2:.4f}")
+                if not is_below_high:
+                    print(f"   {symbol} 不符合震荡条件: 上根收盘{close_prev1:.4f} >= 上上根最高{high_prev2:.4f}")
+                elif not is_above_low:
+                    print(f"   {symbol} 不符合震荡条件: 上根收盘{close_prev1:.4f} <= 上上根最低{low_prev2:.4f}")
             
             time.sleep(0.1)
         except Exception as e:
@@ -186,7 +195,7 @@ def main():
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 昨天日线收阳 + 收盘价 > 前天最高价（日线突破）",
-        f"   • 上根4小时K棒震荡：收盘价 < 上上根4小时K棒最高价",
+        f"   • 上根4小时K棒震荡：收盘价介于上上根高低点之间",
         f"📊 排序：按昨日日线振幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -199,11 +208,11 @@ def main():
                 f"   昨日振幅: ±{item['amplitude']}%\n"
                 f"   昨日收盘: {item['close_yesterday']}\n"
                 f"   突破前高: {item['high_day_before']} → {item['close_yesterday']} 📈\n"
-                f"   上根震荡: 上上根最高{item['high_prev2']} > 上根收盘{item['close_prev1']}"
+                f"   上根震荡: 上上根区间[{item['low_prev2']} - {item['high_prev2']}]，上根收盘{item['close_prev1']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：日线突破前高，上根4小时K线震荡整理，关注后续方向选择")
+        msg_lines.append("💡 解读：日线突破前高，上根4小时K线在区间内震荡，关注突破方向")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
