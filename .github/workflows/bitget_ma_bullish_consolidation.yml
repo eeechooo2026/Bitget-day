@@ -1,4 +1,4 @@
-name: Bitget 均线多头+双K线震荡扫描
+name: Bitget 均线多头+双K线震荡+KDJ上升扫描
 
 on:
   schedule:
