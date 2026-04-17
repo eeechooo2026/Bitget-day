@@ -42,39 +42,6 @@ def send_push_wxpusher(message):
         print(f"❌ 推送异常: {e}")
         return False
 
-def get_4h_period_start_time(beijing_dt):
-    """
-    根据北京时间，返回该时间所属的4小时K线周期的开始时间（UTC时间戳）
-    4小时K线周期：00:00-04:00, 04:00-08:00, 08:00-12:00, 12:00-16:00, 16:00-20:00, 20:00-24:00
-    """
-    hour = beijing_dt.hour
-    if 0 <= hour < 4:
-        period_start = beijing_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif 4 <= hour < 8:
-        period_start = beijing_dt.replace(hour=4, minute=0, second=0, microsecond=0)
-    elif 8 <= hour < 12:
-        period_start = beijing_dt.replace(hour=8, minute=0, second=0, microsecond=0)
-    elif 12 <= hour < 16:
-        period_start = beijing_dt.replace(hour=12, minute=0, second=0, microsecond=0)
-    elif 16 <= hour < 20:
-        period_start = beijing_dt.replace(hour=16, minute=0, second=0, microsecond=0)
-    else:
-        period_start = beijing_dt.replace(hour=20, minute=0, second=0, microsecond=0)
-    
-    # 转换为UTC时间戳（毫秒）
-    period_start_utc = period_start - timedelta(hours=8)
-    return int(period_start_utc.timestamp() * 1000)
-
-def find_kline_by_time(ohlcv_list, target_timestamp):
-    """
-    在K线列表中查找指定时间戳的K线（按开始时间匹配）
-    返回K线数据，如果未找到返回None
-    """
-    for kline in ohlcv_list:
-        if kline[0] == target_timestamp:
-            return kline
-    return None
-
 def calculate_moving_averages(closes, periods):
     """计算移动平均线"""
     ma_values = {}
@@ -100,7 +67,6 @@ def is_consolidation_kline(current_close, prev_high, prev_low):
 def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     """
     计算KDJ指标
-    返回：k_values, d_values, j_values 数组
     """
     n = len(closes)
     k_values = [None] * n
@@ -186,97 +152,77 @@ def main():
         if '/USDT:USDT' in symbol and ticker.get('percentage') is not None:
             daily_gain_dict[symbol] = ticker['percentage']
     
-    # ========== 第三步：计算目标K线的时间段 ==========
-    now_beijing = datetime.now()
-    print(f"📅 当前北京时间: {now_beijing.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # 获取当前K线周期的开始时间
-    current_period_start = get_4h_period_start_time(now_beijing)
-    
-    # 上根（往前推一个4小时周期）
-    prev_period_start = current_period_start - 4 * 60 * 60 * 1000
-    # 上上根（往前推两个4小时周期）
-    prev2_period_start = current_period_start - 8 * 60 * 60 * 1000
-    # 上上上根（往前推三个4小时周期，用于震荡判断）
-    prev3_period_start = current_period_start - 12 * 60 * 60 * 1000
-    
-    print(f"📅 目标K线时间段：")
-    print(f"   上根: {datetime.fromtimestamp(prev_period_start/1000).strftime('%Y-%m-%d %H:%M')} - {datetime.fromtimestamp((prev_period_start+4*3600000)/1000).strftime('%H:%M')}")
-    print(f"   上上根: {datetime.fromtimestamp(prev2_period_start/1000).strftime('%Y-%m-%d %H:%M')} - {datetime.fromtimestamp((prev2_period_start+4*3600000)/1000).strftime('%H:%M')}")
-    
-    # ========== 第四步：获取4小时K线数据并分析 ==========
+    # ========== 第三步：获取4小时K线数据并分析 ==========
     print(f"⏳ 正在获取4小时K线数据...")
     result_list = []
     
     for i, symbol in enumerate(swap_symbols):
         try:
             # 获取足够多的4小时K线（需要至少30根计算MA20和KDJ）
-            ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=50)
+            ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=40)
             if len(ohlcv_4h) < 30:
                 continue
             
-            # ========== 根据时间戳精确查找目标K线 ==========
-            kline_prev1 = find_kline_by_time(ohlcv_4h, prev_period_start)   # 上根
-            kline_prev2 = find_kline_by_time(ohlcv_4h, prev2_period_start)  # 上上根
-            kline_prev3 = find_kline_by_time(ohlcv_4h, prev3_period_start)  # 上上上根
+            # 提取收盘价序列用于计算均线
+            closes = [kline[4] for kline in ohlcv_4h]
             
-            if not (kline_prev1 and kline_prev2 and kline_prev3):
-                continue
-            
-            # 提取K线数据
-            close_prev1 = kline_prev1[4]   # 上根收盘价
-            high_prev1 = kline_prev1[2]    # 上根最高价
-            low_prev1 = kline_prev1[3]     # 上根最低价
-            
-            close_prev2 = kline_prev2[4]   # 上上根收盘价
-            high_prev2 = kline_prev2[2]    # 上上根最高价
-            low_prev2 = kline_prev2[3]     # 上上根最低价
-            
-            high_prev3 = kline_prev3[2]    # 上上上根最高价
-            low_prev3 = kline_prev3[3]     # 上上上根最低价
-            
-            # ========== 均线计算（使用所有K线数据） ==========
-            closes = [k[4] for k in ohlcv_4h]
+            # 计算移动平均线
             ma_values = calculate_moving_averages(closes, MA_PERIODS)
             
+            # 条件1：均线多头排列
             if not is_bullish_arrangement(ma_values):
                 continue
             
-            # 当前收盘价（最近一根已收盘K线）与MA5比较
+            # 条件2：当前收盘价 > MA5（使用最近一根已收盘K线的价格）
             current_close = ohlcv_4h[-1][4]
             if current_close <= ma_values[5]:
                 continue
             
-            # ========== 震荡判断 ==========
+            # ========== 关键：使用固定索引（参考第四个工作流） ==========
+            # 确保有足够多的K线数据（至少需要6根）
+            if len(ohlcv_4h) < 6:
+                continue
+            
+            # 上上上根（索引-5）
+            high_prev3 = ohlcv_4h[-5][2]
+            low_prev3 = ohlcv_4h[-5][3]
+            
+            # 上上根（索引-4）
+            close_prev2 = ohlcv_4h[-4][4]
+            high_prev2 = ohlcv_4h[-4][2]
+            low_prev2 = ohlcv_4h[-4][3]
+            
+            # 上根（索引-3）
+            close_prev1 = ohlcv_4h[-3][4]
+            high_prev1 = ohlcv_4h[-3][2]
+            low_prev1 = ohlcv_4h[-3][3]
+            
+            # 判断上上根是否震荡（相对于上上上根）
             is_consolidation_prev2 = is_consolidation_kline(close_prev2, high_prev3, low_prev3)
+            
+            # 判断上根是否震荡（相对于上上根）
             is_consolidation_prev1 = is_consolidation_kline(close_prev1, high_prev2, low_prev2)
             
             if not (is_consolidation_prev2 and is_consolidation_prev1):
                 continue
             
-            # ========== KDJ指标计算 ==========
-            highs = [k[2] for k in ohlcv_4h]
-            lows = [k[3] for k in ohlcv_4h]
+            # ========== 计算KDJ指标 ==========
+            highs = [kline[2] for kline in ohlcv_4h]
+            lows = [kline[3] for kline in ohlcv_4h]
             
             k_values, d_values, j_values = calculate_kdj(highs, lows, closes, KDJ_RSV_PERIOD, KDJ_SMOOTH)
             
-            # 找到上根和上上根在列表中的索引
-            idx_prev1 = None
-            idx_prev2 = None
-            for idx, kline in enumerate(ohlcv_4h):
-                if kline[0] == prev_period_start:
-                    idx_prev1 = idx
-                if kline[0] == prev2_period_start:
-                    idx_prev2 = idx
+            # 获取上上根（索引-4）和上根（索引-3）的J值
+            idx_prev2 = len(j_values) - 5
+            idx_prev1 = len(j_values) - 4
             
-            if idx_prev1 is None or idx_prev2 is None:
-                continue
-            if j_values[idx_prev1] is None or j_values[idx_prev2] is None:
+            if idx_prev2 < 0 or idx_prev1 < 0 or j_values[idx_prev2] is None or j_values[idx_prev1] is None:
                 continue
             
-            j_prev1 = j_values[idx_prev1]
             j_prev2 = j_values[idx_prev2]
+            j_prev1 = j_values[idx_prev1]
             
+            # 条件3：上根的J值 > 上上根的J值
             if not (j_prev1 > j_prev2):
                 continue
             
@@ -309,10 +255,11 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
     
-    # ========== 第五步：排序推送 ==========
+    # ========== 第四步：按24小时涨幅排序，取前十 ==========
     result_list.sort(key=lambda x: x['daily_gain'], reverse=True)
     top_results = result_list[:PUSH_TOP_N]
     
+    # ========== 第五步：生成推送消息 ==========
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     msg_lines = [
         f"📊 Bitget 均线多头+双K线震荡+KDJ上升扫描",
@@ -345,6 +292,7 @@ def main():
         msg_lines.append("😔 今日未找到符合条件的币种")
     
     message = "\n".join(msg_lines)
+    
     print("\n" + "="*50)
     print(message)
     print("="*50)
