@@ -1,6 +1,6 @@
 import ccxt
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 import json
 
@@ -35,12 +35,17 @@ def send_push_wxpusher(message):
     except Exception as e:
         print(f"❌ 推送异常: {e}")
 
+def get_beijing_now():
+    """获取当前北京时间（datetime对象，无时区信息但数值为北京时间）"""
+    utc_now = datetime.now(timezone.utc)
+    beijing_now = utc_now + timedelta(hours=8)
+    return beijing_now.replace(tzinfo=None)  # 移除时区，后续当作本地时间处理
+
 def get_4h_period_start_timestamp(beijing_dt, offset_periods=0):
     """
-    获取指定偏移量的4小时K线周期的开始时间戳（毫秒，UTC）
+    根据北京时间，获取指定偏移量的4小时K线周期的开始时间戳（毫秒，UTC）
     offset_periods: 0表示当前周期，-1表示上一个周期，-2表示上上个周期，以此类推
     """
-    # 计算当前周期开始时间（北京时间）
     hour = beijing_dt.hour
     if 0 <= hour < 4:
         start_hour = 0
@@ -54,16 +59,14 @@ def get_4h_period_start_timestamp(beijing_dt, offset_periods=0):
         start_hour = 16
     else:
         start_hour = 20
-    
+
     period_start = beijing_dt.replace(hour=start_hour, minute=0, second=0, microsecond=0)
-    # 应用偏移
     period_start += timedelta(hours=offset_periods * 4)
     # 转换为UTC时间戳（毫秒）
     utc_start = period_start - timedelta(hours=8)
     return int(utc_start.timestamp() * 1000)
 
 def find_kline_by_timestamp(ohlcv, target_ts):
-    """在K线列表中查找指定开始时间戳的K线"""
     for k in ohlcv:
         if k[0] == target_ts:
             return k
@@ -106,20 +109,22 @@ def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     return k_vals, d_vals, j_vals
 
 def main():
-    now = datetime.now()
-    print(f"🚀 扫描开始 - 北京时间 {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    beijing_now = get_beijing_now()
+    print(f"🚀 扫描开始 - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     
-    # 计算目标K线的时间戳
-    # 上根 = 上一个完整4小时周期 (offset=-1)
-    # 上上根 = 上上个周期 (offset=-2)
-    # 上上上根 = 上上上个周期 (offset=-3)
-    prev1_ts = get_4h_period_start_timestamp(now, -1)   # 上根
-    prev2_ts = get_4h_period_start_timestamp(now, -2)   # 上上根
-    prev3_ts = get_4h_period_start_timestamp(now, -3)   # 上上上根
-    print(f"📅 目标K线时间段:")
-    print(f"   上根: {datetime.fromtimestamp(prev1_ts/1000).strftime('%Y-%m-%d %H:%M')} UTC")
-    print(f"   上上根: {datetime.fromtimestamp(prev2_ts/1000).strftime('%Y-%m-%d %H:%M')} UTC")
-    print(f"   上上上根: {datetime.fromtimestamp(prev3_ts/1000).strftime('%Y-%m-%d %H:%M')} UTC")
+    # 计算目标K线的时间戳（UTC）
+    prev1_ts = get_4h_period_start_timestamp(beijing_now, -1)   # 上根
+    prev2_ts = get_4h_period_start_timestamp(beijing_now, -2)   # 上上根
+    prev3_ts = get_4h_period_start_timestamp(beijing_now, -3)   # 上上上根
+    
+    # 将时间戳转换为北京时间用于显示
+    def ts_to_beijing(ts):
+        return datetime.fromtimestamp(ts/1000) + timedelta(hours=8)
+    
+    print("📅 目标K线时间段（北京时间）:")
+    print(f"   上根: {ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts)+timedelta(hours=4)).strftime('%H:%M')}")
+    print(f"   上上根: {ts_to_beijing(prev2_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev2_ts)+timedelta(hours=4)).strftime('%H:%M')}")
+    print(f"   上上上根: {ts_to_beijing(prev3_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev3_ts)+timedelta(hours=4)).strftime('%H:%M')}")
     
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     
@@ -136,12 +141,10 @@ def main():
     results = []
     for idx, symbol in enumerate(swap_symbols):
         try:
-            # 获取足够多的4小时K线（至少需要30根用于均线和KDJ）
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe='4h', limit=50)
             if len(ohlcv) < 30:
                 continue
             
-            # 提取收盘价序列
             closes = [k[4] for k in ohlcv]
             ma5 = calculate_ma(closes, 5)
             ma10 = calculate_ma(closes, 10)
@@ -149,35 +152,30 @@ def main():
             if not is_bullish_arrangement(ma5, ma10, ma20):
                 continue
             
-            # 精确查找目标K线
-            k_prev1 = find_kline_by_timestamp(ohlcv, prev1_ts)  # 上根
-            k_prev2 = find_kline_by_timestamp(ohlcv, prev2_ts)  # 上上根
-            k_prev3 = find_kline_by_timestamp(ohlcv, prev3_ts)  # 上上上根
+            k_prev1 = find_kline_by_timestamp(ohlcv, prev1_ts)
+            k_prev2 = find_kline_by_timestamp(ohlcv, prev2_ts)
+            k_prev3 = find_kline_by_timestamp(ohlcv, prev3_ts)
             if not (k_prev1 and k_prev2 and k_prev3):
                 continue
             
-            close1 = k_prev1[4]   # 上根收盘价
+            close1 = k_prev1[4]
             high1 = k_prev1[2]
             low1 = k_prev1[3]
-            close2 = k_prev2[4]   # 上上根收盘价
+            close2 = k_prev2[4]
             high2 = k_prev2[2]
             low2 = k_prev2[3]
-            high3 = k_prev3[2]    # 上上上根最高价
-            low3 = k_prev3[3]     # 上上上根最低价
+            high3 = k_prev3[2]
+            low3 = k_prev3[3]
             
-            # 条件1: 上根收盘价 > MA5
             if close1 <= ma5:
                 continue
             
-            # 条件2: 双K线震荡
             if not (is_consolidation(close2, high3, low3) and is_consolidation(close1, high2, low2)):
                 continue
             
-            # 条件3: KDJ J值上升
             highs = [k[2] for k in ohlcv]
             lows = [k[3] for k in ohlcv]
             _, _, j_vals = calculate_kdj(highs, lows, closes, KDJ_RSV_PERIOD, KDJ_SMOOTH)
-            # 找到上根和上上根在数组中的索引（根据时间戳）
             idx1 = next((i for i, k in enumerate(ohlcv) if k[0] == prev1_ts), None)
             idx2 = next((i for i, k in enumerate(ohlcv) if k[0] == prev2_ts), None)
             if idx1 is None or idx2 is None or j_vals[idx1] is None or j_vals[idx2] is None:
@@ -210,11 +208,10 @@ def main():
             print(f"⚠️ {symbol} 分析出错: {e}")
             time.sleep(0.3)
     
-    # 排序并推送
     results.sort(key=lambda x: x['gain'], reverse=True)
     top = results[:PUSH_TOP_N]
     
-    msg = f"📊 Bitget 均线多头+双K线震荡+KDJ上升\n🕘 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    msg = f"📊 Bitget 均线多头+双K线震荡+KDJ上升\n🕘 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M')}\n"
     msg += "📈 条件: MA5>MA10>MA20 & 上根收盘>MA5 & 双K线震荡 & J值上升\n"
     msg += f"📊 共{len(results)}个, 推送Top{len(top)}\n━━━━━━━━━━━━━━━━━━━━\n"
     for i, r in enumerate(top, 1):
