@@ -184,35 +184,35 @@ def main():
                 continue
             
             # 条件2：当前收盘价 > MA5（价格在短期均线上方）
+            # 注意：使用最近一根已收盘K线的价格
             current_close = ohlcv_4h[-1][4]
             if current_close <= ma_values[5]:
                 continue
             
-            # 索引说明（按时间从旧到新）：
-            # ohlcv[-7] ~ ohlcv[-6] 更早的K线（用于KDJ计算）
-            # ohlcv[-5] = 上上上根（供上上根判断震荡）
-            # ohlcv[-4] = 上上根（需要判断震荡 + 获取J值）
-            # ohlcv[-3] = 上根（需要判断震荡 + 获取J值）
-            # ohlcv[-2] = 当前K线的前一根（不参与判断）
-            # ohlcv[-1] = 当前K线（未完全确定，仅用于价格判断）
-            
+            # ========== 关键修正：确保有足够的K线用于震荡判断 ==========
             if len(ohlcv_4h) < 6:
                 continue
             
-            # 获取K线数据
+            # 固定偏移量：从列表末尾往前取
+            # ohlcv_4h[-5] = 上上上根
+            # ohlcv_4h[-4] = 上上根
+            # ohlcv_4h[-3] = 上根
+            # ohlcv_4h[-2] = 不参与判断
+            # ohlcv_4h[-1] = 当前K线（已收盘，用于价格比较）
+            
             # 上上上根（索引-5）
-            high_prev3 = ohlcv_4h[-5][2]   # 上上上根最高价
-            low_prev3 = ohlcv_4h[-5][3]    # 上上上根最低价
+            high_prev3 = ohlcv_4h[-5][2]
+            low_prev3 = ohlcv_4h[-5][3]
             
             # 上上根（索引-4）
-            close_prev2 = ohlcv_4h[-4][4]  # 上上根收盘价
-            high_prev2 = ohlcv_4h[-4][2]   # 上上根最高价
-            low_prev2 = ohlcv_4h[-4][3]    # 上上根最低价
+            close_prev2 = ohlcv_4h[-4][4]
+            high_prev2 = ohlcv_4h[-4][2]
+            low_prev2 = ohlcv_4h[-4][3]
             
             # 上根（索引-3）
-            close_prev1 = ohlcv_4h[-3][4]  # 上根收盘价
-            high_prev1 = ohlcv_4h[-3][2]   # 上根最高价
-            low_prev1 = ohlcv_4h[-3][3]    # 上根最低价
+            close_prev1 = ohlcv_4h[-3][4]
+            high_prev1 = ohlcv_4h[-3][2]
+            low_prev1 = ohlcv_4h[-3][3]
             
             # 判断上上根是否震荡（相对于上上上根）
             is_consolidation_prev2 = is_consolidation_kline(close_prev2, high_prev3, low_prev3)
