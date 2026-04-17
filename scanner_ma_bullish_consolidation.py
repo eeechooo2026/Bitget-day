@@ -1,9 +1,8 @@
 import ccxt
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 import requests
 import json
-import math
 
 # ================== 配置区域 ==================
 # WxPusher 配置（已自动填充）
@@ -67,6 +66,7 @@ def is_consolidation_kline(current_close, prev_high, prev_low):
 def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     """
     计算KDJ指标
+    返回：k_values, d_values, j_values 数组
     """
     n = len(closes)
     k_values = [None] * n
@@ -105,7 +105,7 @@ def main():
     beijing_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"🚀 开始均线多头+双K线震荡+KDJ上升扫描 - 北京时间 {beijing_time}")
     print(f"📈 策略逻辑：")
-    print(f"   • 4小时图均线多头排列（MA5 > MA10 > MA20，且收盘价 > MA5）")
+    print(f"   • 4小时图均线多头排列（MA5 > MA10 > MA20，且上根K棒收盘价 > MA5）")
     print(f"   • 上根和上上根4小时K棒均处于震荡（收盘价落于前一根区间内）")
     print(f"   • 上根4小时K棒的KDJ的J值 > 上上根4小时K棒的J值")
     print(f"📊 排序：按24小时涨幅从高到低")
@@ -173,16 +173,11 @@ def main():
             if not is_bullish_arrangement(ma_values):
                 continue
             
-            # 条件2：当前收盘价 > MA5（使用最近一根已收盘K线的价格）
-            current_close = ohlcv_4h[-1][4]
-            if current_close <= ma_values[5]:
-                continue
-            
-            # ========== 关键：使用固定索引（参考第四个工作流） ==========
-            # 确保有足够多的K线数据（至少需要6根）
+            # 确保有足够K线用于固定索引
             if len(ohlcv_4h) < 6:
                 continue
             
+            # ========== 固定索引定位K线（参考第四个工作流） ==========
             # 上上上根（索引-5）
             high_prev3 = ohlcv_4h[-5][2]
             low_prev3 = ohlcv_4h[-5][3]
@@ -197,16 +192,18 @@ def main():
             high_prev1 = ohlcv_4h[-3][2]
             low_prev1 = ohlcv_4h[-3][3]
             
-            # 判断上上根是否震荡（相对于上上上根）
-            is_consolidation_prev2 = is_consolidation_kline(close_prev2, high_prev3, low_prev3)
+            # 条件1的补充：上根K棒收盘价 > MA5（修改点）
+            if close_prev1 <= ma_values[5]:
+                continue
             
-            # 判断上根是否震荡（相对于上上根）
+            # 条件2：震荡判断
+            is_consolidation_prev2 = is_consolidation_kline(close_prev2, high_prev3, low_prev3)
             is_consolidation_prev1 = is_consolidation_kline(close_prev1, high_prev2, low_prev2)
             
             if not (is_consolidation_prev2 and is_consolidation_prev1):
                 continue
             
-            # ========== 计算KDJ指标 ==========
+            # ========== KDJ指标计算 ==========
             highs = [kline[2] for kline in ohlcv_4h]
             lows = [kline[3] for kline in ohlcv_4h]
             
@@ -222,7 +219,7 @@ def main():
             j_prev2 = j_values[idx_prev2]
             j_prev1 = j_values[idx_prev1]
             
-            # 条件3：上根的J值 > 上上根的J值
+            # 条件3：上根J值 > 上上根J值
             if not (j_prev1 > j_prev2):
                 continue
             
@@ -235,13 +232,12 @@ def main():
                 'ma5': round(ma_values[5], 4),
                 'ma10': round(ma_values[10], 4),
                 'ma20': round(ma_values[20], 4),
-                'current_close': round(current_close, 4),
+                'close_prev1': round(close_prev1, 4),
                 'j_prev2': round(j_prev2, 2),
                 'j_prev1': round(j_prev1, 2),
                 'close_prev2': round(close_prev2, 4),
                 'high_prev3': round(high_prev3, 4),
                 'low_prev3': round(low_prev3, 4),
-                'close_prev1': round(close_prev1, 4),
                 'high_prev2': round(high_prev2, 4),
                 'low_prev2': round(low_prev2, 4),
             })
@@ -265,7 +261,7 @@ def main():
         f"📊 Bitget 均线多头+双K线震荡+KDJ上升扫描",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 4小时图均线多头排列（MA5 > MA10 > MA20，价格 > MA5）",
+        f"   • 4小时图均线多头排列（MA5 > MA10 > MA20，且上根K棒收盘价 > MA5）",
         f"   • 上根和上上根4小时K棒均处于震荡（收盘价落于前一根区间内）",
         f"   • 上根KDJ的J值 > 上上根KDJ的J值",
         f"📊 排序：按24小时涨幅从高到低",
@@ -279,7 +275,7 @@ def main():
                 f"{idx}. {item['symbol']}\n"
                 f"   24h涨幅: +{item['daily_gain']}%\n"
                 f"   均线: MA5={item['ma5']} > MA10={item['ma10']} > MA20={item['ma20']}\n"
-                f"   当前价: {item['current_close']} > MA5 ✅\n"
+                f"   上根收盘: {item['close_prev1']} > MA5 ✅\n"
                 f"   J值变化: {item['j_prev2']:.2f} → {item['j_prev1']:.2f} 📈\n"
                 f"   上上根震荡: 收盘{item['close_prev2']} 落于区间[{item['low_prev3']}-{item['high_prev3']}]\n"
                 f"   上根震荡: 收盘{item['close_prev1']} 落于区间[{item['low_prev2']}-{item['high_prev2']}]"
