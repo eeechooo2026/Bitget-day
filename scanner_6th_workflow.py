@@ -3,9 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 import requests
 import json
-import math
-import numpy as np
-from collections import defaultdict
+# import math  # 未使用，可保留但无影响
 
 # ================== 配置区域 ==================
 # WxPusher 配置（请替换成你自己的信息）
@@ -54,7 +52,6 @@ def get_period_start_timestamp(beijing_dt, offset_periods=0, timeframe_minutes=6
     根据北京时间，获取指定偏移量的K线周期的开始时间戳（毫秒，UTC）
     offset_periods: 0表示当前周期，-1表示上一个周期，-2表示上上个周期，以此类推
     """
-    # 计算当前周期开始时间（北京时间）
     total_minutes = beijing_dt.hour * 60 + beijing_dt.minute
     period_minutes = total_minutes // timeframe_minutes * timeframe_minutes
     start_hour = period_minutes // 60
