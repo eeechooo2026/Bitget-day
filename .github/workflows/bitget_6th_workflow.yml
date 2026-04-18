@@ -1,0 +1,20 @@
+name: Bitget 第六个工作流 - 1小时级别扫描
+
+on:
+  schedule:
+    # 每小时运行一次 (UTC时间)
+    # 北京时间是整点后的01分开始扫描，确保上一个小时K线已完全收盘
+    - cron: '1 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 6th workflow scan
+        run: python scanner_6th_workflow.py
