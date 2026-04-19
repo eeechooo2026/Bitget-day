@@ -1,8 +1,7 @@
-name: Bitget 第五个工作流 - 均线多头+震荡+KDJ（日线涨幅排序）
+name: Bitget 第五个工作流 - 4小时级别扫描（均线多头+震荡+KDJ上升）
 
 on:
   schedule:
-    # 北京时间 8:01, 12:01, 16:01, 20:01, 00:01
     - cron: '1 0,4,8,12,16 * * *'
   workflow_dispatch:
 
@@ -16,4 +15,4 @@ jobs:
           python-version: '3.10'
       - run: pip install -r requirements.txt
       - name: Run 5th workflow scan
-        run: python scanner_ma_bullish_consolidation.py
+        run: python scanner_5th_workflow.py
