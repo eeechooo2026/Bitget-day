@@ -15,8 +15,9 @@ MA_PERIODS = [5, 10, 20]
 KDJ_RSV_PERIOD = 9
 KDJ_SMOOTH = 3
 
-FIXED_TEST_MODE = True   # 固定测试今天 08:00-12:00 作为上根
-DEBUG_SYMBOLS = ['BLUR/USDT:USDT']
+# 调试开关：固定测试今天 08:00-12:00 周期
+FIXED_TEST_MODE = True   # 设为 True 时固定测试 08:00-12:00 作为上根
+DEBUG_SYMBOLS = ['BLUR/USDT:USDT']   # 调试的币种，留空则关闭详细日志
 # =============================================
 
 def send_push_wxpusher(message):
@@ -76,10 +77,12 @@ def get_dynamic_4h_timestamps(beijing_now):
     return utc_prev1, utc_prev2, utc_prev3
 
 def get_daily_period_start_timestamp(beijing_dt, offset_days=0):
-    day_start = beijing_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_start += timedelta(days=offset_days)
-    utc_start = day_start - timedelta(hours=8)
-    return int(utc_start.timestamp() * 1000)
+    """
+    根据北京时间，获取指定偏移量的日线K线的开始时间戳（毫秒，UTC）
+    """
+    utc_date = (beijing_dt + timedelta(days=offset_days) - timedelta(hours=8)).date()
+    dt_start = datetime(utc_date.year, utc_date.month, utc_date.day, tzinfo=timezone.utc)
+    return int(dt_start.timestamp() * 1000)
 
 def find_kline_by_timestamp(ohlcv, target_ts):
     for k in ohlcv:
@@ -87,12 +90,18 @@ def find_kline_by_timestamp(ohlcv, target_ts):
             return k
     return None
 
+def find_daily_kline_by_date(ohlcv_1d, target_utc_date):
+    """
+    在日线列表中，根据UTC日期查找K线
+    """
+    target_date_str = target_utc_date.strftime('%Y-%m-%d')
+    for k in ohlcv_1d:
+        k_date = datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc).date()
+        if k_date.strftime('%Y-%m-%d') == target_date_str:
+            return k
+    return None
+
 def calculate_ma_for_target_kline(ohlcv, target_ts, period):
-    """
-    基于目标K线的时间戳，向前取 period 根K线（包含目标K线本身）计算移动平均
-    返回 MA 值，如果数据不足则返回 None
-    """
-    # 找到目标K线的索引
     target_idx = None
     for i, k in enumerate(ohlcv):
         if k[0] == target_ts:
@@ -100,7 +109,6 @@ def calculate_ma_for_target_kline(ohlcv, target_ts, period):
             break
     if target_idx is None or target_idx < period - 1:
         return None
-    # 取从 target_idx - period + 1 到 target_idx 的收盘价
     closes = [ohlcv[j][4] for j in range(target_idx - period + 1, target_idx + 1)]
     return sum(closes) / period
 
@@ -135,8 +143,10 @@ def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     return k_values, d_values, j_values
 
 def calculate_daily_gain(ohlcv_1d, target_ts, prev_ts):
-    k_target = find_kline_by_timestamp(ohlcv_1d, target_ts)
-    k_prev = find_kline_by_timestamp(ohlcv_1d, prev_ts)
+    target_date = datetime.fromtimestamp(target_ts / 1000, tz=timezone.utc).date()
+    prev_date = datetime.fromtimestamp(prev_ts / 1000, tz=timezone.utc).date()
+    k_target = find_daily_kline_by_date(ohlcv_1d, target_date)
+    k_prev = find_daily_kline_by_date(ohlcv_1d, prev_date)
     if not (k_target and k_prev):
         return None
     close_target = k_target[4]
@@ -200,12 +210,12 @@ def main():
                 if is_debug: print(f"❌ 4小时K线不足30根 (实际{len(ohlcv_4h)})")
                 continue
             
-            ohlcv_1d = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=10)
+            # 增加日线获取数量，确保有足够数据
+            ohlcv_1d = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=20)
             if len(ohlcv_1d) < 5:
                 if is_debug: print(f"❌ 日线K线不足5根 (实际{len(ohlcv_1d)})")
                 continue
             
-            # 查找目标K线
             k_prev1 = find_kline_by_timestamp(ohlcv_4h, prev1_ts_4h)
             k_prev2 = find_kline_by_timestamp(ohlcv_4h, prev2_ts_4h)
             if not (k_prev1 and k_prev2):
@@ -218,11 +228,9 @@ def main():
             if is_debug: print(f"   上根: 收盘={close1:.4f}, 开盘={open1:.4f}, 最低={low1:.4f}")
             if is_debug: print(f"   上上根最低={low2:.4f}")
             
-            # 关键修正：基于上根K线的时间戳，向前取 period 根K线计算 MA5, MA10, MA20
             ma5 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 5)
             ma10 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 10)
             ma20 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 20)
-            
             if is_debug:
                 print(f"   MA5={ma5:.4f}, MA10={ma10:.4f}, MA20={ma20:.4f}")
             
@@ -246,7 +254,6 @@ def main():
                 continue
             if is_debug: print(f"✅ 最低价创新低")
             
-            # KDJ 计算（J值比较）
             closes_4h = [k[4] for k in ohlcv_4h]
             highs_4h = [k[2] for k in ohlcv_4h]
             lows_4h = [k[3] for k in ohlcv_4h]
