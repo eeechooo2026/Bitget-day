@@ -1,0 +1,20 @@
+name: Bitget 第十个工作流 - 4小时级别空头扫描
+
+on:
+  schedule:
+    # 每天北京时间 4:00, 8:00, 12:00, 16:00, 20:00
+    # 对应 UTC 时间 20:00, 0:00, 4:00, 8:00, 12:00
+    - cron: '0 20,0,4,8,12 * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 10th workflow scan
+        run: python scanner_10th_workflow.py
