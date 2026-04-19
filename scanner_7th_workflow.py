@@ -15,9 +15,8 @@ MA_PERIODS = [5, 10, 20]
 KDJ_RSV_PERIOD = 9
 KDJ_SMOOTH = 3
 
-# 调试开关：固定测试今天 08:00-12:00 周期
-FIXED_TEST_MODE = True   # 设为 True 时固定测试 08:00-12:00 作为上根
-DEBUG_SYMBOLS = ['BLUR/USDT:USDT']   # 调试的币种，留空则关闭详细日志
+FIXED_TEST_MODE = True   # 固定测试今天 08:00-12:00 作为上根
+DEBUG_SYMBOLS = ['BLUR/USDT:USDT']
 # =============================================
 
 def send_push_wxpusher(message):
@@ -45,10 +44,6 @@ def get_utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 def get_fixed_4h_timestamps(beijing_today):
-    """
-    固定返回今天 08:00-12:00 作为上根，04:00-08:00 作为上上根
-    beijing_today: 北京时间的今天日期（datetime 对象，时间部分会被忽略）
-    """
     root_8am = beijing_today.replace(hour=8, minute=0, second=0, microsecond=0)
     prev1_ts = int((root_8am - timedelta(hours=8)).timestamp() * 1000)
     root_4am = beijing_today.replace(hour=4, minute=0, second=0, microsecond=0)
@@ -58,7 +53,6 @@ def get_fixed_4h_timestamps(beijing_today):
     return prev1_ts, prev2_ts, prev3_ts
 
 def get_dynamic_4h_timestamps(beijing_now):
-    """动态计算当前时间对应的上根、上上根时间戳"""
     hour = beijing_now.hour
     if 0 <= hour < 4:
         start_hour = 0
@@ -93,25 +87,27 @@ def find_kline_by_timestamp(ohlcv, target_ts):
             return k
     return None
 
-def calculate_moving_averages_including_current(closes, periods):
+def calculate_ma_for_target_kline(ohlcv, target_ts, period):
     """
-    计算包含当前K线的移动平均线（与交易所K线图一致）
-    closes: 收盘价列表，最后一个是当前K线（上根）
-    periods: 周期列表，如 [5,10,20]
+    基于目标K线的时间戳，向前取 period 根K线（包含目标K线本身）计算移动平均
+    返回 MA 值，如果数据不足则返回 None
     """
-    ma_values = {}
-    n = len(closes)
-    for period in periods:
-        if n >= period:
-            ma_values[period] = sum(closes[-period:]) / period
-        else:
-            ma_values[period] = None
-    return ma_values
+    # 找到目标K线的索引
+    target_idx = None
+    for i, k in enumerate(ohlcv):
+        if k[0] == target_ts:
+            target_idx = i
+            break
+    if target_idx is None or target_idx < period - 1:
+        return None
+    # 取从 target_idx - period + 1 到 target_idx 的收盘价
+    closes = [ohlcv[j][4] for j in range(target_idx - period + 1, target_idx + 1)]
+    return sum(closes) / period
 
-def is_bullish_arrangement(ma_values):
-    if ma_values[5] is None or ma_values[10] is None or ma_values[20] is None:
+def is_bullish_arrangement(ma5, ma10, ma20):
+    if ma5 is None or ma10 is None or ma20 is None:
         return False
-    return ma_values[5] > ma_values[10] > ma_values[20]
+    return ma5 > ma10 > ma20
 
 def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     n = len(closes)
@@ -209,14 +205,7 @@ def main():
                 if is_debug: print(f"❌ 日线K线不足5根 (实际{len(ohlcv_1d)})")
                 continue
             
-            # 修正：计算包含当前K线的均线（与交易所一致）
-            closes_4h = [k[4] for k in ohlcv_4h]
-            ma_values = calculate_moving_averages_including_current(closes_4h, MA_PERIODS)
-            if not is_bullish_arrangement(ma_values):
-                if is_debug: print(f"❌ 均线非多头: MA5={ma_values[5]:.4f}, MA10={ma_values[10]:.4f}, MA20={ma_values[20]:.4f}")
-                continue
-            if is_debug: print(f"✅ 均线多头: {ma_values[5]:.4f} > {ma_values[10]:.4f} > {ma_values[20]:.4f}")
-            
+            # 查找目标K线
             k_prev1 = find_kline_by_timestamp(ohlcv_4h, prev1_ts_4h)
             k_prev2 = find_kline_by_timestamp(ohlcv_4h, prev2_ts_4h)
             if not (k_prev1 and k_prev2):
@@ -229,9 +218,21 @@ def main():
             if is_debug: print(f"   上根: 收盘={close1:.4f}, 开盘={open1:.4f}, 最低={low1:.4f}")
             if is_debug: print(f"   上上根最低={low2:.4f}")
             
-            # 收盘 > MA5（现在MA5已包含当前K线）
-            if close1 <= ma_values[5]:
-                if is_debug: print(f"❌ 收盘 {close1:.4f} <= MA5 {ma_values[5]:.4f}")
+            # 关键修正：基于上根K线的时间戳，向前取 period 根K线计算 MA5, MA10, MA20
+            ma5 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 5)
+            ma10 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 10)
+            ma20 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 20)
+            
+            if is_debug:
+                print(f"   MA5={ma5:.4f}, MA10={ma10:.4f}, MA20={ma20:.4f}")
+            
+            if not is_bullish_arrangement(ma5, ma10, ma20):
+                if is_debug: print(f"❌ 均线非多头")
+                continue
+            if is_debug: print(f"✅ 均线多头")
+            
+            if close1 <= ma5:
+                if is_debug: print(f"❌ 收盘 {close1:.4f} <= MA5 {ma5:.4f}")
                 continue
             if is_debug: print(f"✅ 收盘 > MA5")
             
@@ -245,6 +246,8 @@ def main():
                 continue
             if is_debug: print(f"✅ 最低价创新低")
             
+            # KDJ 计算（J值比较）
+            closes_4h = [k[4] for k in ohlcv_4h]
             highs_4h = [k[2] for k in ohlcv_4h]
             lows_4h = [k[3] for k in ohlcv_4h]
             _, _, j_vals = calculate_kdj(highs_4h, lows_4h, closes_4h, KDJ_RSV_PERIOD, KDJ_SMOOTH)
@@ -268,9 +271,9 @@ def main():
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'gain_1d': round(gain_1d, 2),
-                'ma5': round(ma_values[5], 4),
-                'ma10': round(ma_values[10], 4),
-                'ma20': round(ma_values[20], 4),
+                'ma5': round(ma5, 4),
+                'ma10': round(ma10, 4),
+                'ma20': round(ma20, 4),
                 'close1': round(close1, 4),
                 'low1': round(low1, 4),
                 'low2': round(low2, 4),
