@@ -5,25 +5,23 @@ import requests
 import json
 
 # ================== 配置区域 ==================
-# WxPusher 配置（已自动填充）
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-PUSH_TOP_N = 10            # 推送前N名
-TIMEFRAME_4H = '4h'        # 4小时K线周期
-TIMEFRAME_1D = '1d'        # 日线K线周期
-MA_PERIODS = [5, 10, 20]   # 均线周期
-KDJ_RSV_PERIOD = 9         # KDJ指标中RSV的周期
-KDJ_SMOOTH = 3             # K、D的平滑周期
+PUSH_TOP_N = 10
+TIMEFRAME_4H = '4h'
+TIMEFRAME_1D = '1d'
+MA_PERIODS = [5, 10, 20]
+KDJ_RSV_PERIOD = 9
+KDJ_SMOOTH = 3
 # =============================================
 
 def send_push_wxpusher(message):
-    """使用 WxPusher 推送消息到微信"""
     url = "https://wxpusher.zjiecode.com/api/send/message"
     payload = {
         "appToken": WX_PUSHER_APP_TOKEN,
         "content": message,
-        "summary": message[:50] if len(message) > 50 else message,
+        "summary": message[:50],
         "contentType": 1,
         "uids": [WX_PUSHER_UID],
     }
@@ -34,23 +32,15 @@ def send_push_wxpusher(message):
         result = response.json()
         if result.get("code") == 1000:
             print("✅ WxPusher 推送成功!")
-            return True
         else:
-            print(f"❌ WxPusher 推送失败: {result}")
-            return False
+            print(f"❌ 推送失败: {result}")
     except Exception as e:
         print(f"❌ 推送异常: {e}")
-        return False
 
 def get_utc_now():
-    """获取当前UTC时间的datetime对象（无时区信息）"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 def get_4h_period_start_timestamp(beijing_dt, offset_periods=0):
-    """
-    根据北京时间，获取指定偏移量的4小时K线周期的开始时间戳（毫秒，UTC）
-    offset_periods: 0表示当前周期，-1表示上一个周期，-2表示上上个周期，以此类推
-    """
     hour = beijing_dt.hour
     if 0 <= hour < 4:
         start_hour = 0
@@ -64,301 +54,240 @@ def get_4h_period_start_timestamp(beijing_dt, offset_periods=0):
         start_hour = 16
     else:
         start_hour = 20
-
     period_start = beijing_dt.replace(hour=start_hour, minute=0, second=0, microsecond=0)
     period_start += timedelta(hours=offset_periods * 4)
-    # 转换为UTC时间戳（毫秒）
     utc_start = period_start - timedelta(hours=8)
     return int(utc_start.timestamp() * 1000)
 
 def get_daily_period_start_timestamp(beijing_dt, offset_days=0):
-    """
-    根据北京时间，获取指定偏移量的日线K线的开始时间戳（毫秒，UTC）
-    offset_days: 0表示今天，-1表示昨天，-2表示前天，以此类推
-    """
-    day_start = beijing_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_start += timedelta(days=offset_days)
-    # 转换为UTC时间戳（毫秒）
-    utc_start = day_start - timedelta(hours=8)
-    return int(utc_start.timestamp() * 1000)
+    utc_date = (beijing_dt + timedelta(days=offset_days) - timedelta(hours=8)).date()
+    dt_start = datetime(utc_date.year, utc_date.month, utc_date.day, tzinfo=timezone.utc)
+    return int(dt_start.timestamp() * 1000)
 
 def find_kline_by_timestamp(ohlcv, target_ts):
-    """在K线列表中查找指定开始时间戳的K线"""
     for k in ohlcv:
         if k[0] == target_ts:
             return k
     return None
 
-def calculate_moving_averages(closes, periods):
-    """计算移动平均线"""
-    ma_values = {}
-    for period in periods:
-        if len(closes) >= period:
-            ma_values[period] = sum(closes[-period:]) / period
-        else:
-            ma_values[period] = None
-    return ma_values
+def find_daily_kline_by_date(ohlcv_1d, target_utc_date):
+    target_date_str = target_utc_date.strftime('%Y-%m-%d')
+    for k in ohlcv_1d:
+        k_date = datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc).date()
+        if k_date.strftime('%Y-%m-%d') == target_date_str:
+            return k
+    return None
 
-def is_bullish_arrangement(ma_values):
-    """判断均线是否多头排列 MA5 > MA10 > MA20"""
-    if ma_values[5] is None or ma_values[10] is None or ma_values[20] is None:
+def calculate_ma_for_target_kline(ohlcv, target_ts, period):
+    target_idx = None
+    for i, k in enumerate(ohlcv):
+        if k[0] == target_ts:
+            target_idx = i
+            break
+    if target_idx is None or target_idx < period - 1:
+        return None
+    closes = [ohlcv[j][4] for j in range(target_idx - period + 1, target_idx + 1)]
+    return sum(closes) / period
+
+def is_bullish_arrangement(ma5, ma10, ma20):
+    if ma5 is None or ma10 is None or ma20 is None:
         return False
-    return ma_values[5] > ma_values[10] > ma_values[20]
+    return ma5 > ma10 > ma20
 
 def is_consolidation_kline(current_close, prev_high, prev_low):
-    """判断当前K线是否处于震荡（收盘价落在前一根K线的高低点区间内）"""
     return current_close < prev_high and current_close > prev_low
 
 def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
-    """
-    计算KDJ指标
-    返回：k_values, d_values, j_values 数组
-    """
     n = len(closes)
     k_values = [None] * n
     d_values = [None] * n
     j_values = [None] * n
-    
     if n < rsv_period:
         return k_values, d_values, j_values
-    
     k_prev = 50
     d_prev = 50
-    
     for i in range(rsv_period - 1, n):
         period_high = max(highs[i - rsv_period + 1:i + 1])
         period_low = min(lows[i - rsv_period + 1:i + 1])
-        
         if period_high == period_low:
             rsv = 50
         else:
             rsv = (closes[i] - period_low) / (period_high - period_low) * 100
-        
         k = (k_prev * (smooth - 1) + rsv) / smooth
         d = (d_prev * (smooth - 1) + k) / smooth
         j = 3 * k - 2 * d
-        
         k_values[i] = k
         d_values[i] = d
         j_values[i] = j
-        
-        k_prev = k
-        d_prev = d
-    
+        k_prev, d_prev = k, d
     return k_values, d_values, j_values
 
-def calculate_daily_gain(ohlcv_1d, prev1_ts, prev2_ts):
-    """
-    计算前两根日线K棒的累计涨幅
-    """
-    k1 = find_kline_by_timestamp(ohlcv_1d, prev1_ts)  # 较新的日线（昨天）
-    k2 = find_kline_by_timestamp(ohlcv_1d, prev2_ts)  # 较旧的日线（前天）
-    if not (k1 and k2):
+def calculate_daily_gain(ohlcv_1d, target_ts, prev_ts):
+    target_date = datetime.fromtimestamp(target_ts / 1000, tz=timezone.utc).date()
+    prev_date = datetime.fromtimestamp(prev_ts / 1000, tz=timezone.utc).date()
+    k_target = find_daily_kline_by_date(ohlcv_1d, target_date)
+    k_prev = find_daily_kline_by_date(ohlcv_1d, prev_date)
+    if not (k_target and k_prev):
         return None
-    close1 = k1[4]
-    close2 = k2[4]
-    if close2 == 0:
+    close_target = k_target[4]
+    close_prev = k_prev[4]
+    if close_prev == 0:
         return None
-    gain = (close1 - close2) / close2 * 100
-    return gain
+    return (close_target - close_prev) / close_prev * 100
+
+def ts_to_beijing(ts):
+    return datetime.fromtimestamp(ts/1000) + timedelta(hours=8)
 
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第五个工作流扫描（均线多头+双K线震荡+KDJ上升，按日线涨幅排序）- 北京时间 {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🚀 开始第五个工作流扫描（均线多头+双K线震荡+KDJ上升） - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 4小时图均线多头排列（MA5 > MA10 > MA20，且上根K棒收盘价 > MA5）")
+    print(f"   • 上根4小时K棒均线多头排列（MA5 > MA10 > MA20，且上根K棒收盘价 > MA5）")
     print(f"   • 上根和上上根4小时K棒均处于震荡（收盘价落于前一根区间内）")
-    print(f"   • 上根4小时K棒的KDJ的J值 > 上上根4小时K棒的J值")
+    print(f"   • 上根KDJ的J值 > 上上根KDJ的J值")
     print(f"📊 排序：按前两根日线K棒涨幅从高到低")
-    
-    # 初始化 Bitget 合约接口
-    exchange = ccxt.bitget({
-        'enableRateLimit': True,
-        'options': {
-            'defaultType': 'swap',
-        },
-    })
-    
-    # ========== 第一步：获取所有USDT本位永续合约 ==========
+
+    exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+
     print("📡 正在加载合约市场数据...")
-    try:
-        markets = exchange.load_markets()
-        print(f"📊 共加载 {len(markets)} 个交易对")
-    except Exception as e:
-        print(f"❌ 加载市场数据失败: {e}")
-        return
-    
-    swap_symbols = []
-    for symbol, market in markets.items():
-        if market.get('type') == 'swap' and symbol.endswith('/USDT:USDT'):
-            swap_symbols.append(symbol)
-    
+    markets = exchange.load_markets()
+    print(f"📊 共加载 {len(markets)} 个交易对")
+    swap_symbols = [s for s, m in markets.items() if m['type'] == 'swap' and s.endswith('/USDT:USDT')]
     print(f"📊 共找到 {len(swap_symbols)} 个 USDT 本位合约")
-    
+
     if len(swap_symbols) == 0:
         print("❌ 未找到合约交易对")
         return
-    
-    # ========== 第二步：计算目标K线的时间戳 ==========
-    # 4小时级别
-    prev1_ts_4h = get_4h_period_start_timestamp(beijing_now, -1)   # 上根4小时
-    prev2_ts_4h = get_4h_period_start_timestamp(beijing_now, -2)   # 上上根4小时
-    prev3_ts_4h = get_4h_period_start_timestamp(beijing_now, -3)   # 上上上根4小时（用于震荡判断）
-    
-    # 日线级别（用于排序）：取昨天和前天两根已收盘的日线
-    # 注意：当前日期可能未收盘，所以取前一天和前两天
-    prev1_ts_1d = get_daily_period_start_timestamp(beijing_now, -1)   # 昨天日线
-    prev2_ts_1d = get_daily_period_start_timestamp(beijing_now, -2)   # 前天日线
-    
-    def ts_to_beijing(ts):
-        return datetime.fromtimestamp(ts/1000) + timedelta(hours=8)
-    
+
+    # 计算目标K线时间戳
+    prev1_ts_4h = get_4h_period_start_timestamp(beijing_now, -1)   # 上根
+    prev2_ts_4h = get_4h_period_start_timestamp(beijing_now, -2)   # 上上根
+    prev3_ts_4h = get_4h_period_start_timestamp(beijing_now, -3)   # 上上上根
+
+    prev1_ts_1d = get_daily_period_start_timestamp(beijing_now, -1)   # 昨天
+    prev2_ts_1d = get_daily_period_start_timestamp(beijing_now, -2)   # 前天
+
     print("📅 目标K线时间段（北京时间）:")
     print(f"   上根4小时: {ts_to_beijing(prev1_ts_4h).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts_4h)+timedelta(hours=4)).strftime('%H:%M')}")
     print(f"   上上根4小时: {ts_to_beijing(prev2_ts_4h).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev2_ts_4h)+timedelta(hours=4)).strftime('%H:%M')}")
     print(f"   上上上根4小时: {ts_to_beijing(prev3_ts_4h).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev3_ts_4h)+timedelta(hours=4)).strftime('%H:%M')}")
     print(f"   排序用日线: {ts_to_beijing(prev2_ts_1d).strftime('%Y-%m-%d')} 和 {ts_to_beijing(prev1_ts_1d).strftime('%Y-%m-%d')}")
-    
-    # ========== 第三步：获取所有合约的4小时和日线K线数据 ==========
-    print(f"⏳ 正在获取K线数据...")
+
+    print("⏳ 正在获取K线数据...")
     result_list = []
-    
+
     for idx, symbol in enumerate(swap_symbols):
         try:
-            # 获取4小时K线数据（需要至少30根）
-            ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=50)
+            ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=100)
             if len(ohlcv_4h) < 30:
                 continue
-            
-            # 获取日线K线数据（需要至少5根）
-            ohlcv_1d = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=10)
+
+            ohlcv_1d = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=20)
             if len(ohlcv_1d) < 5:
                 continue
-            
-            # ========== 4小时级别条件判断 ==========
-            closes_4h = [k[4] for k in ohlcv_4h]
-            ma_values = calculate_moving_averages(closes_4h, MA_PERIODS)
-            
-            # 条件1：均线多头排列
-            if not is_bullish_arrangement(ma_values):
-                continue
-            
-            # 精确查找4小时K线
-            k_prev1 = find_kline_by_timestamp(ohlcv_4h, prev1_ts_4h)  # 上根
-            k_prev2 = find_kline_by_timestamp(ohlcv_4h, prev2_ts_4h)  # 上上根
-            k_prev3 = find_kline_by_timestamp(ohlcv_4h, prev3_ts_4h)  # 上上上根
-            
+
+            # 查找K线
+            k_prev1 = find_kline_by_timestamp(ohlcv_4h, prev1_ts_4h)
+            k_prev2 = find_kline_by_timestamp(ohlcv_4h, prev2_ts_4h)
+            k_prev3 = find_kline_by_timestamp(ohlcv_4h, prev3_ts_4h)
             if not (k_prev1 and k_prev2 and k_prev3):
                 continue
-            
-            close1 = k_prev1[4]
-            open1 = k_prev1[1]
-            low1 = k_prev1[3]
-            close2 = k_prev2[4]
-            high2 = k_prev2[2]
-            low2 = k_prev2[3]
-            high3 = k_prev3[2]
-            low3 = k_prev3[3]
-            
-            # 条件2：上根K棒收盘价 > MA5
-            if close1 <= ma_values[5]:
+
+            close1, open1 = k_prev1[4], k_prev1[1]
+            close2, high2, low2 = k_prev2[4], k_prev2[2], k_prev2[3]
+            high3, low3 = k_prev3[2], k_prev3[3]
+
+            # 条件1：均线多头排列（基于上根计算MA5, MA10, MA20）
+            ma5 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 5)
+            ma10 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 10)
+            ma20 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 20)
+            if not is_bullish_arrangement(ma5, ma10, ma20):
                 continue
-            
-            # 条件3：上上根震荡（收盘价介于上上上根高低点之间）
+            if close1 <= ma5:
+                continue
+
+            # 条件2：上上根震荡（收盘价介于上上上根高低点之间）
             if not is_consolidation_kline(close2, high3, low3):
                 continue
-            
-            # 条件4：上根震荡（收盘价介于上上根高低点之间）
+
+            # 条件3：上根震荡（收盘价介于上上根高低点之间）
             if not is_consolidation_kline(close1, high2, low2):
                 continue
-            
-            # 条件5：KDJ的J值大于上上根
+
+            # 条件4：KDJ J值上升
+            closes_4h = [k[4] for k in ohlcv_4h]
             highs_4h = [k[2] for k in ohlcv_4h]
             lows_4h = [k[3] for k in ohlcv_4h]
             _, _, j_vals = calculate_kdj(highs_4h, lows_4h, closes_4h, KDJ_RSV_PERIOD, KDJ_SMOOTH)
-            
             idx1 = next((i for i, k in enumerate(ohlcv_4h) if k[0] == prev1_ts_4h), None)
             idx2 = next((i for i, k in enumerate(ohlcv_4h) if k[0] == prev2_ts_4h), None)
             if idx1 is None or idx2 is None or j_vals[idx1] is None or j_vals[idx2] is None:
                 continue
-            
             if j_vals[idx1] <= j_vals[idx2]:
                 continue
-            
-            # ========== 日线级别涨幅计算 ==========
-            daily_gain = calculate_daily_gain(ohlcv_1d, prev1_ts_1d, prev2_ts_1d)
-            if daily_gain is None:
+
+            # 日线涨幅
+            gain_1d = calculate_daily_gain(ohlcv_1d, prev1_ts_1d, prev2_ts_1d)
+            if gain_1d is None:
                 continue
-            
-            # 所有条件满足，添加到结果列表
+
             result_list.append({
-                'symbol': symbol.replace('/USDT:USDT', '').replace('/USDT', ''),
-                'daily_gain': round(daily_gain, 2),
-                'ma5': round(ma_values[5], 4),
-                'ma10': round(ma_values[10], 4),
-                'ma20': round(ma_values[20], 4),
+                'symbol': symbol.replace('/USDT:USDT', ''),
+                'gain_1d': round(gain_1d, 2),
+                'ma5': round(ma5, 4),
+                'ma10': round(ma10, 4),
+                'ma20': round(ma20, 4),
                 'close1': round(close1, 4),
+                'close2': round(close2, 4),
                 'j_prev2': round(j_vals[idx2], 2),
                 'j_prev1': round(j_vals[idx1], 2),
-                'close2': round(close2, 4),
-                'high3': round(high3, 4),
-                'low3': round(low3, 4),
-                'high2': round(high2, 4),
-                'low2': round(low2, 4),
             })
-            print(f"✓ {symbol} 满足条件，日线涨幅{daily_gain:.2f}%")
-            
-            if (idx + 1) % 50 == 0:
-                print(f"   进度: {idx+1}/{len(swap_symbols)}")
-            
+
+            if (idx+1) % 50 == 0:
+                print(f"进度: {idx+1}/{len(swap_symbols)}")
             time.sleep(0.1)
         except Exception as e:
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
-    
-    # ========== 第四步：按日线涨幅排序，取前十 ==========
-    result_list.sort(key=lambda x: x['daily_gain'], reverse=True)
-    top_results = result_list[:PUSH_TOP_N]
-    
-    # ========== 第五步：生成推送消息 ==========
+
+    result_list.sort(key=lambda x: x['gain_1d'], reverse=True)
+    top = result_list[:PUSH_TOP_N]
+
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 均线多头+双K线震荡+KDJ上升扫描（日线涨幅排序）",
+        f"📊 Bitget 4小时级别扫描（第五个工作流 - 均线多头+震荡+KDJ上升）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 4小时图均线多头排列（MA5>MA10>MA20，且上根K棒收盘价>MA5）",
-        f"   • 上根和上上根4小时K棒均处于震荡（收盘价落于前一根区间内）",
-        f"   • 上根KDJ的J值 > 上上根KDJ的J值",
-        f"📊 排序：按前两根日线K棒涨幅从高到低",
+        f"   • 上根均线多头排列（MA5>MA10>MA20，且收盘>MA5）",
+        f"   • 上上根震荡（收盘介于上上上根区间）",
+        f"   • 上根震荡（收盘介于上上根区间）",
+        f"   • 上根J值 > 上上根J值",
+        f"📊 排序：按前两根日线涨幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
-    
-    if top_results:
+    if top:
         msg_lines.append(f"📋 推送前十名（共{len(result_list)}个符合条件的币种）：")
-        for i, item in enumerate(top_results, 1):
+        for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
-                f"   日线涨幅: +{item['daily_gain']}%\n"
+                f"   日线涨幅: +{item['gain_1d']}%\n"
                 f"   均线: {item['ma5']} > {item['ma10']} > {item['ma20']}\n"
                 f"   上根收盘: {item['close1']} > MA5 ✅\n"
-                f"   J值变化: {item['j_prev2']} → {item['j_prev1']} 📈\n"
-                f"   上上根震荡: 收盘{item['close2']} 落于区间[{item['low3']}-{item['high3']}]\n"
-                f"   上根震荡: 收盘{item['close1']} 落于区间[{item['low2']}-{item['high2']}]"
+                f"   上上根震荡: {item['close2']} ∈ 前根区间\n"
+                f"   J值变化: {item['j_prev2']} → {item['j_prev1']} 📈"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：均线多头+双K线区间震荡+J值上升，日线级别上涨趋势确认")
+        msg_lines.append("💡 解读：均线多头+双K线区间震荡+J值上升，日线级别上涨确认")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
-    
+
     message = "\n".join(msg_lines)
-    
     print("\n" + "="*50)
     print(message)
     print("="*50)
-    
     send_push_wxpusher(message)
 
 if __name__ == "__main__":
