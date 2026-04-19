@@ -15,8 +15,9 @@ MA_PERIODS = [5, 10, 20]
 KDJ_RSV_PERIOD = 9
 KDJ_SMOOTH = 3
 
-# 调试开关：填入你想调试的币种（标准格式，如 'BLUR/USDT:USDT'）
-DEBUG_SYMBOLS = ['BLUR/USDT:USDT']   # 可修改为其他币种，留空则关闭调试
+# 调试开关：固定测试今天 08:00-12:00 周期
+FIXED_TEST_MODE = True   # 设为 True 时固定测试 08:00-12:00 作为上根
+DEBUG_SYMBOLS = ['BLUR/USDT:USDT']   # 调试的币种，留空则关闭详细日志
 # =============================================
 
 def send_push_wxpusher(message):
@@ -43,8 +44,25 @@ def send_push_wxpusher(message):
 def get_utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
-def get_4h_period_start_timestamp(beijing_dt, offset_periods=0):
-    hour = beijing_dt.hour
+def get_fixed_4h_timestamps(beijing_today):
+    """
+    固定返回今天 08:00-12:00 作为上根，04:00-08:00 作为上上根
+    beijing_today: 北京时间的今天日期（datetime 对象，时间部分会被忽略）
+    """
+    # 上根：今天 08:00
+    root_8am = beijing_today.replace(hour=8, minute=0, second=0, microsecond=0)
+    prev1_ts = int((root_8am - timedelta(hours=8)).timestamp() * 1000)
+    # 上上根：今天 04:00
+    root_4am = beijing_today.replace(hour=4, minute=0, second=0, microsecond=0)
+    prev2_ts = int((root_4am - timedelta(hours=8)).timestamp() * 1000)
+    # 上上上根：今天 00:00（用于震荡判断，若有需要）
+    root_0am = beijing_today.replace(hour=0, minute=0, second=0, microsecond=0)
+    prev3_ts = int((root_0am - timedelta(hours=8)).timestamp() * 1000)
+    return prev1_ts, prev2_ts, prev3_ts
+
+def get_dynamic_4h_timestamps(beijing_now):
+    """动态计算当前时间对应的上根、上上根时间戳"""
+    hour = beijing_now.hour
     if 0 <= hour < 4:
         start_hour = 0
     elif 4 <= hour < 8:
@@ -57,10 +75,14 @@ def get_4h_period_start_timestamp(beijing_dt, offset_periods=0):
         start_hour = 16
     else:
         start_hour = 20
-    period_start = beijing_dt.replace(hour=start_hour, minute=0, second=0, microsecond=0)
-    period_start += timedelta(hours=offset_periods * 4)
-    utc_start = period_start - timedelta(hours=8)
-    return int(utc_start.timestamp() * 1000)
+    period_start = beijing_now.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+    prev1 = period_start - timedelta(hours=4)   # 上根
+    prev2 = period_start - timedelta(hours=8)   # 上上根
+    prev3 = period_start - timedelta(hours=12)  # 上上上根
+    utc_prev1 = int((prev1 - timedelta(hours=8)).timestamp() * 1000)
+    utc_prev2 = int((prev2 - timedelta(hours=8)).timestamp() * 1000)
+    utc_prev3 = int((prev3 - timedelta(hours=8)).timestamp() * 1000)
+    return utc_prev1, utc_prev2, utc_prev3
 
 def get_daily_period_start_timestamp(beijing_dt, offset_days=0):
     day_start = beijing_dt.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -130,7 +152,17 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第七个工作流扫描 - 当前UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}")
+    beijing_today = beijing_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    if FIXED_TEST_MODE:
+        # 固定使用今天 08:00-12:00 作为上根
+        prev1_ts_4h, prev2_ts_4h, prev3_ts_4h = get_fixed_4h_timestamps(beijing_today)
+        print(f"🚀 固定测试模式：上根=今天 08:00-12:00，上上根=今天 04:00-08:00")
+    else:
+        prev1_ts_4h, prev2_ts_4h, prev3_ts_4h = get_dynamic_4h_timestamps(beijing_now)
+        print(f"🚀 动态模式：根据当前时间计算")
+    
+    print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根4小时K棒均线多头排列（MA5 > MA10 > MA20，且上根K棒收盘价 > MA5）")
     print(f"   • 上根4小时K棒收阳、最低价低于上上根K棒的最低价、且KDJ的J值大于上上根")
@@ -138,7 +170,6 @@ def main():
     
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     
-    # 加载市场数据
     print("📡 正在加载合约市场数据...")
     markets = exchange.load_markets()
     print(f"📊 共加载 {len(markets)} 个交易对")
@@ -149,9 +180,7 @@ def main():
         print("❌ 未找到合约交易对")
         return
     
-    # 计算时间戳
-    prev1_ts_4h = get_4h_period_start_timestamp(beijing_now, -1)
-    prev2_ts_4h = get_4h_period_start_timestamp(beijing_now, -2)
+    # 日线时间戳（昨天和前天）
     prev1_ts_1d = get_daily_period_start_timestamp(beijing_now, -1)
     prev2_ts_1d = get_daily_period_start_timestamp(beijing_now, -2)
     
@@ -169,19 +198,16 @@ def main():
             print(f"\n🔍 详细分析 {symbol}")
         
         try:
-            # 获取4小时K线
             ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=80)
             if len(ohlcv_4h) < 30:
                 if is_debug: print(f"❌ 4小时K线不足30根 (实际{len(ohlcv_4h)})")
                 continue
             
-            # 获取日线K线
             ohlcv_1d = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=10)
             if len(ohlcv_1d) < 5:
                 if is_debug: print(f"❌ 日线K线不足5根 (实际{len(ohlcv_1d)})")
                 continue
             
-            # 计算均线
             closes_4h = [k[4] for k in ohlcv_4h]
             ma_values = calculate_moving_averages(closes_4h, MA_PERIODS)
             if not is_bullish_arrangement(ma_values):
@@ -189,7 +215,6 @@ def main():
                 continue
             if is_debug: print(f"✅ 均线多头: {ma_values[5]:.4f} > {ma_values[10]:.4f} > {ma_values[20]:.4f}")
             
-            # 查找K线
             k_prev1 = find_kline_by_timestamp(ohlcv_4h, prev1_ts_4h)
             k_prev2 = find_kline_by_timestamp(ohlcv_4h, prev2_ts_4h)
             if not (k_prev1 and k_prev2):
@@ -199,37 +224,31 @@ def main():
             
             close1, open1, low1 = k_prev1[4], k_prev1[1], k_prev1[3]
             low2 = k_prev2[3]
-            
             if is_debug: print(f"   上根: 收盘={close1:.4f}, 开盘={open1:.4f}, 最低={low1:.4f}")
             if is_debug: print(f"   上上根最低={low2:.4f}")
             
-            # 收盘 > MA5
             if close1 <= ma_values[5]:
                 if is_debug: print(f"❌ 收盘 {close1:.4f} <= MA5 {ma_values[5]:.4f}")
                 continue
             if is_debug: print(f"✅ 收盘 > MA5")
             
-            # 收阳
             if close1 <= open1:
-                if is_debug: print(f"❌ 未收阳 (收盘<=开盘)")
+                if is_debug: print(f"❌ 未收阳")
                 continue
             if is_debug: print(f"✅ 收阳")
             
-            # 最低价低于上上根最低价
             if low1 >= low2:
                 if is_debug: print(f"❌ 最低价 {low1:.4f} >= 上上根最低 {low2:.4f}")
                 continue
             if is_debug: print(f"✅ 最低价创新低")
             
-            # KDJ J值比较
             highs_4h = [k[2] for k in ohlcv_4h]
             lows_4h = [k[3] for k in ohlcv_4h]
             _, _, j_vals = calculate_kdj(highs_4h, lows_4h, closes_4h, KDJ_RSV_PERIOD, KDJ_SMOOTH)
-            
             idx1 = next((i for i, k in enumerate(ohlcv_4h) if k[0] == prev1_ts_4h), None)
             idx2 = next((i for i, k in enumerate(ohlcv_4h) if k[0] == prev2_ts_4h), None)
             if idx1 is None or idx2 is None or j_vals[idx1] is None or j_vals[idx2] is None:
-                if is_debug: print(f"❌ 无法获取J值: idx1={idx1}, idx2={idx2}, j1={j_vals[idx1] if idx1 is not None else None}, j2={j_vals[idx2] if idx2 is not None else None}")
+                if is_debug: print(f"❌ 无法获取J值")
                 continue
             if is_debug: print(f"   J值: 上上根={j_vals[idx2]:.2f}, 上根={j_vals[idx1]:.2f}")
             if j_vals[idx1] <= j_vals[idx2]:
@@ -237,14 +256,12 @@ def main():
                 continue
             if is_debug: print(f"✅ J值上升")
             
-            # 日线涨幅
             gain_1d = calculate_daily_gain(ohlcv_1d, prev1_ts_1d, prev2_ts_1d)
             if gain_1d is None:
                 if is_debug: print(f"❌ 日线涨幅计算失败")
                 continue
             if is_debug: print(f"✅ 日线涨幅: {gain_1d:.2f}%")
             
-            # 全部通过
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'gain_1d': round(gain_1d, 2),
@@ -266,7 +283,6 @@ def main():
             if is_debug: print(f"⚠️ 异常: {e}")
             time.sleep(0.3)
     
-    # 排序并推送
     result_list.sort(key=lambda x: x['gain_1d'], reverse=True)
     top = result_list[:PUSH_TOP_N]
     
