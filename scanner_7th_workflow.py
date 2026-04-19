@@ -13,6 +13,7 @@ PUSH_TOP_N = 10
 TIMEFRAME_4H = '4h'
 KDJ_RSV_PERIOD = 9
 KDJ_SMOOTH = 3
+MA20_PERIOD = 20
 # =============================================
 
 def send_push_wxpusher(message):
@@ -64,6 +65,18 @@ def find_kline_by_timestamp(ohlcv, target_ts):
             return k
     return None
 
+def calculate_ma_for_target_kline(ohlcv, target_ts, period):
+    """基于目标K线向前取period根K线（包含本身）计算移动平均"""
+    target_idx = None
+    for i, k in enumerate(ohlcv):
+        if k[0] == target_ts:
+            target_idx = i
+            break
+    if target_idx is None or target_idx < period - 1:
+        return None
+    closes = [ohlcv[j][4] for j in range(target_idx - period + 1, target_idx + 1)]
+    return sum(closes) / period
+
 def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     n = len(closes)
     k_values = [None] * n
@@ -95,11 +108,12 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第七个工作流扫描（随机排序版） - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🚀 开始第七个工作流扫描（收盘价>MA20版） - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
+    print(f"   • 上根4小时K棒收盘价 > MA20")
     print(f"   • 上根4小时K棒收阳")
-    print(f"   • 上根4小时K棒最低价低于上上根最低价")
-    print(f"   • 上根4小时K棒的KDJ的J值 > 上上根")
+    print(f"   • 上根最低价 < 上上根最低价")
+    print(f"   • 上根J值 > 上上根J值")
     print(f"📊 推送：随机排序前十名")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -127,7 +141,7 @@ def main():
 
     for idx, symbol in enumerate(swap_symbols):
         try:
-            ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=80)
+            ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=100)  # 需要至少20根，取100根确保足够
             if len(ohlcv_4h) < 30:
                 continue
 
@@ -140,14 +154,20 @@ def main():
             close1, open1, low1 = k_prev1[4], k_prev1[1], k_prev1[3]
             low2 = k_prev2[3]
 
-            # 条件1：收阳
+            # 条件1：收盘价 > MA20
+            ma20 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, MA20_PERIOD)
+            if ma20 is None or close1 <= ma20:
+                continue
+
+            # 条件2：收阳
             if close1 <= open1:
                 continue
-            # 条件2：最低价创新低
+
+            # 条件3：最低价创新低
             if low1 >= low2:
                 continue
 
-            # 条件3：KDJ J值上升
+            # 条件4：KDJ J值上升
             closes_4h = [k[4] for k in ohlcv_4h]
             highs_4h = [k[2] for k in ohlcv_4h]
             lows_4h = [k[3] for k in ohlcv_4h]
@@ -163,6 +183,7 @@ def main():
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'close1': round(close1, 4),
+                'ma20': round(ma20, 4),
                 'low1': round(low1, 4),
                 'low2': round(low2, 4),
                 'j_prev2': round(j_vals[idx2], 2),
@@ -182,10 +203,11 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时级别扫描（第七个工作流 - 随机排序版）",
+        f"📊 Bitget 4小时级别扫描（收盘价>MA20版）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根4小时K棒收阳",
+        f"   • 上根收盘价 > MA20",
+        f"   • 上根收阳",
         f"   • 上根最低价 < 上上根最低价",
         f"   • 上根J值 > 上上根J值",
         f"📊 推送：随机排序前十名",
@@ -196,13 +218,13 @@ def main():
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
-                f"   上根收盘: {item['close1']} 📈\n"
+                f"   上根收盘: {item['close1']} > MA20({item['ma20']}) ✅\n"
                 f"   上根最低: {item['low1']} < 上上根最低 {item['low2']}\n"
                 f"   J值变化: {item['j_prev2']} → {item['j_prev1']} 📈"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：4小时级别收阳+创新低+J值上升，短线多头信号")
+        msg_lines.append("💡 解读：价格站上MA20且收阳+创新低+J值上升，中期趋势转强")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
