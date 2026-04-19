@@ -49,13 +49,10 @@ def get_fixed_4h_timestamps(beijing_today):
     固定返回今天 08:00-12:00 作为上根，04:00-08:00 作为上上根
     beijing_today: 北京时间的今天日期（datetime 对象，时间部分会被忽略）
     """
-    # 上根：今天 08:00
     root_8am = beijing_today.replace(hour=8, minute=0, second=0, microsecond=0)
     prev1_ts = int((root_8am - timedelta(hours=8)).timestamp() * 1000)
-    # 上上根：今天 04:00
     root_4am = beijing_today.replace(hour=4, minute=0, second=0, microsecond=0)
     prev2_ts = int((root_4am - timedelta(hours=8)).timestamp() * 1000)
-    # 上上上根：今天 00:00（用于震荡判断，若有需要）
     root_0am = beijing_today.replace(hour=0, minute=0, second=0, microsecond=0)
     prev3_ts = int((root_0am - timedelta(hours=8)).timestamp() * 1000)
     return prev1_ts, prev2_ts, prev3_ts
@@ -76,9 +73,9 @@ def get_dynamic_4h_timestamps(beijing_now):
     else:
         start_hour = 20
     period_start = beijing_now.replace(hour=start_hour, minute=0, second=0, microsecond=0)
-    prev1 = period_start - timedelta(hours=4)   # 上根
-    prev2 = period_start - timedelta(hours=8)   # 上上根
-    prev3 = period_start - timedelta(hours=12)  # 上上上根
+    prev1 = period_start - timedelta(hours=4)
+    prev2 = period_start - timedelta(hours=8)
+    prev3 = period_start - timedelta(hours=12)
     utc_prev1 = int((prev1 - timedelta(hours=8)).timestamp() * 1000)
     utc_prev2 = int((prev2 - timedelta(hours=8)).timestamp() * 1000)
     utc_prev3 = int((prev3 - timedelta(hours=8)).timestamp() * 1000)
@@ -96,10 +93,16 @@ def find_kline_by_timestamp(ohlcv, target_ts):
             return k
     return None
 
-def calculate_moving_averages(closes, periods):
+def calculate_moving_averages_including_current(closes, periods):
+    """
+    计算包含当前K线的移动平均线（与交易所K线图一致）
+    closes: 收盘价列表，最后一个是当前K线（上根）
+    periods: 周期列表，如 [5,10,20]
+    """
     ma_values = {}
+    n = len(closes)
     for period in periods:
-        if len(closes) >= period:
+        if n >= period:
             ma_values[period] = sum(closes[-period:]) / period
         else:
             ma_values[period] = None
@@ -155,7 +158,6 @@ def main():
     beijing_today = beijing_now.replace(hour=0, minute=0, second=0, microsecond=0)
     
     if FIXED_TEST_MODE:
-        # 固定使用今天 08:00-12:00 作为上根
         prev1_ts_4h, prev2_ts_4h, prev3_ts_4h = get_fixed_4h_timestamps(beijing_today)
         print(f"🚀 固定测试模式：上根=今天 08:00-12:00，上上根=今天 04:00-08:00")
     else:
@@ -180,7 +182,6 @@ def main():
         print("❌ 未找到合约交易对")
         return
     
-    # 日线时间戳（昨天和前天）
     prev1_ts_1d = get_daily_period_start_timestamp(beijing_now, -1)
     prev2_ts_1d = get_daily_period_start_timestamp(beijing_now, -2)
     
@@ -208,8 +209,9 @@ def main():
                 if is_debug: print(f"❌ 日线K线不足5根 (实际{len(ohlcv_1d)})")
                 continue
             
+            # 修正：计算包含当前K线的均线（与交易所一致）
             closes_4h = [k[4] for k in ohlcv_4h]
-            ma_values = calculate_moving_averages(closes_4h, MA_PERIODS)
+            ma_values = calculate_moving_averages_including_current(closes_4h, MA_PERIODS)
             if not is_bullish_arrangement(ma_values):
                 if is_debug: print(f"❌ 均线非多头: MA5={ma_values[5]:.4f}, MA10={ma_values[10]:.4f}, MA20={ma_values[20]:.4f}")
                 continue
@@ -227,6 +229,7 @@ def main():
             if is_debug: print(f"   上根: 收盘={close1:.4f}, 开盘={open1:.4f}, 最低={low1:.4f}")
             if is_debug: print(f"   上上根最低={low2:.4f}")
             
+            # 收盘 > MA5（现在MA5已包含当前K线）
             if close1 <= ma_values[5]:
                 if is_debug: print(f"❌ 收盘 {close1:.4f} <= MA5 {ma_values[5]:.4f}")
                 continue
