@@ -1,4 +1,4 @@
-name: Bitget 第五个工作流 - 4小时级别扫描（无J值条件版）
+name: Bitget 第五个工作流 - 4小时级别扫描（完整版）
 
 on:
   schedule:
