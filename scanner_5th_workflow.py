@@ -12,8 +12,6 @@ PUSH_TOP_N = 10
 TIMEFRAME_4H = '4h'
 TIMEFRAME_1D = '1d'
 MA_PERIODS = [5, 10, 20]
-KDJ_RSV_PERIOD = 9
-KDJ_SMOOTH = 3
 # =============================================
 
 def send_push_wxpusher(message):
@@ -97,31 +95,6 @@ def is_bullish_arrangement(ma5, ma10, ma20):
 def is_consolidation_kline(current_close, prev_high, prev_low):
     return current_close < prev_high and current_close > prev_low
 
-def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
-    n = len(closes)
-    k_values = [None] * n
-    d_values = [None] * n
-    j_values = [None] * n
-    if n < rsv_period:
-        return k_values, d_values, j_values
-    k_prev = 50
-    d_prev = 50
-    for i in range(rsv_period - 1, n):
-        period_high = max(highs[i - rsv_period + 1:i + 1])
-        period_low = min(lows[i - rsv_period + 1:i + 1])
-        if period_high == period_low:
-            rsv = 50
-        else:
-            rsv = (closes[i] - period_low) / (period_high - period_low) * 100
-        k = (k_prev * (smooth - 1) + rsv) / smooth
-        d = (d_prev * (smooth - 1) + k) / smooth
-        j = 3 * k - 2 * d
-        k_values[i] = k
-        d_values[i] = d
-        j_values[i] = j
-        k_prev, d_prev = k, d
-    return k_values, d_values, j_values
-
 def calculate_daily_gain(ohlcv_1d, target_ts, prev_ts):
     target_date = datetime.fromtimestamp(target_ts / 1000, tz=timezone.utc).date()
     prev_date = datetime.fromtimestamp(prev_ts / 1000, tz=timezone.utc).date()
@@ -141,11 +114,10 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第五个工作流扫描（均线多头+双K线震荡+KDJ上升） - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🚀 开始第五个工作流扫描（无J值条件版） - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上根4小时K棒均线多头排列（MA5 > MA10 > MA20，且上根K棒收盘价 > MA5）")
+    print(f"   • 上根4小时K棒均线多头排列（MA5 > MA10 > MA20，且收盘价 > MA5）")
     print(f"   • 上根和上上根4小时K棒均处于震荡（收盘价落于前一根区间内）")
-    print(f"   • 上根KDJ的J值 > 上上根KDJ的J值")
     print(f"📊 排序：按前两根日线K棒涨幅从高到低")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -160,7 +132,6 @@ def main():
         print("❌ 未找到合约交易对")
         return
 
-    # 计算目标K线时间戳
     prev1_ts_4h = get_4h_period_start_timestamp(beijing_now, -1)   # 上根
     prev2_ts_4h = get_4h_period_start_timestamp(beijing_now, -2)   # 上上根
     prev3_ts_4h = get_4h_period_start_timestamp(beijing_now, -3)   # 上上上根
@@ -187,16 +158,15 @@ def main():
             if len(ohlcv_1d) < 5:
                 continue
 
-            # 查找K线
-            k_prev1 = find_kline_by_timestamp(ohlcv_4h, prev1_ts_4h)
-            k_prev2 = find_kline_by_timestamp(ohlcv_4h, prev2_ts_4h)
-            k_prev3 = find_kline_by_timestamp(ohlcv_4h, prev3_ts_4h)
-            if not (k_prev1 and k_prev2 and k_prev3):
+            k1 = find_kline_by_timestamp(ohlcv_4h, prev1_ts_4h)
+            k2 = find_kline_by_timestamp(ohlcv_4h, prev2_ts_4h)
+            k3 = find_kline_by_timestamp(ohlcv_4h, prev3_ts_4h)
+            if not (k1 and k2 and k3):
                 continue
 
-            close1, open1 = k_prev1[4], k_prev1[1]
-            close2, high2, low2 = k_prev2[4], k_prev2[2], k_prev2[3]
-            high3, low3 = k_prev3[2], k_prev3[3]
+            close1, open1 = k1[4], k1[1]
+            close2, high2, low2 = k2[4], k2[2], k2[3]
+            high3, low3 = k3[2], k3[3]
 
             # 条件1：均线多头排列（基于上根计算MA5, MA10, MA20）
             ma5 = calculate_ma_for_target_kline(ohlcv_4h, prev1_ts_4h, 5)
@@ -207,24 +177,12 @@ def main():
             if close1 <= ma5:
                 continue
 
-            # 条件2：上上根震荡（收盘价介于上上上根高低点之间）
+            # 条件2：上上根震荡（收盘价介于上上上根区间）
             if not is_consolidation_kline(close2, high3, low3):
                 continue
 
-            # 条件3：上根震荡（收盘价介于上上根高低点之间）
+            # 条件3：上根震荡（收盘价介于上上根区间）
             if not is_consolidation_kline(close1, high2, low2):
-                continue
-
-            # 条件4：KDJ J值上升
-            closes_4h = [k[4] for k in ohlcv_4h]
-            highs_4h = [k[2] for k in ohlcv_4h]
-            lows_4h = [k[3] for k in ohlcv_4h]
-            _, _, j_vals = calculate_kdj(highs_4h, lows_4h, closes_4h, KDJ_RSV_PERIOD, KDJ_SMOOTH)
-            idx1 = next((i for i, k in enumerate(ohlcv_4h) if k[0] == prev1_ts_4h), None)
-            idx2 = next((i for i, k in enumerate(ohlcv_4h) if k[0] == prev2_ts_4h), None)
-            if idx1 is None or idx2 is None or j_vals[idx1] is None or j_vals[idx2] is None:
-                continue
-            if j_vals[idx1] <= j_vals[idx2]:
                 continue
 
             # 日线涨幅
@@ -240,8 +198,6 @@ def main():
                 'ma20': round(ma20, 4),
                 'close1': round(close1, 4),
                 'close2': round(close2, 4),
-                'j_prev2': round(j_vals[idx2], 2),
-                'j_prev1': round(j_vals[idx1], 2),
             })
 
             if (idx+1) % 50 == 0:
@@ -256,13 +212,12 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时级别扫描（第五个工作流 - 均线多头+震荡+KDJ上升）",
+        f"📊 Bitget 4小时级别扫描（第五个工作流 - 无J值条件版）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 上根均线多头排列（MA5>MA10>MA20，且收盘>MA5）",
         f"   • 上上根震荡（收盘介于上上上根区间）",
         f"   • 上根震荡（收盘介于上上根区间）",
-        f"   • 上根J值 > 上上根J值",
         f"📊 排序：按前两根日线涨幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -274,12 +229,11 @@ def main():
                 f"   日线涨幅: +{item['gain_1d']}%\n"
                 f"   均线: {item['ma5']} > {item['ma10']} > {item['ma20']}\n"
                 f"   上根收盘: {item['close1']} > MA5 ✅\n"
-                f"   上上根震荡: {item['close2']} ∈ 前根区间\n"
-                f"   J值变化: {item['j_prev2']} → {item['j_prev1']} 📈"
+                f"   上上根震荡: {item['close2']} ∈ 前根区间"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：均线多头+双K线区间震荡+J值上升，日线级别上涨确认")
+        msg_lines.append("💡 解读：均线多头+双K线区间震荡，日线级别上涨确认")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
