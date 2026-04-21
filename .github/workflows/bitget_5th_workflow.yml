@@ -1,4 +1,4 @@
-name: Bitget 第五个工作流 - 4小时级别扫描
+name: Bitget 第五个工作流 - 4小时级别扫描（日线涨幅排序）
 
 on:
   schedule:
