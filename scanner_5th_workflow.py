@@ -12,6 +12,11 @@ PUSH_TOP_N = 10
 TIMEFRAME_4H = '4h'
 KDJ_RSV_PERIOD = 9
 KDJ_SMOOTH = 3
+
+# 策略参数
+BIG_GAIN_THRESHOLD = 3.0   # 大涨K线的最小涨幅（%）
+CONSOL_AMP_THRESHOLD = 2.0 # 震荡K线的最大振幅（%）
+CONSOL_CLOSE_RATIO = 0.98  # 震荡K线收盘不低于大涨K线收盘的98%
 # =============================================
 
 def send_push_wxpusher(message):
@@ -74,9 +79,6 @@ def calculate_ma_for_target_kline(ohlcv, target_ts, period):
     closes = [ohlcv[j][4] for j in range(target_idx - period + 1, target_idx + 1)]
     return sum(closes) / period
 
-def is_consolidation_kline(current_close, prev_high, prev_low):
-    return current_close < prev_high and current_close > prev_low
-
 def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     n = len(closes)
     k_values = [None] * n
@@ -108,12 +110,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第五个工作流扫描 - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🚀 开始第五个工作流扫描（大涨后震荡版） - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上根4小时K棒收盘价 > MA5，且 MA5 > MA10 ≥ MA20")
-    print(f"   • 上根和上上根4小时K棒均处于震荡（收盘价落于前一根区间内）")
+    print(f"   • 上上根大涨（涨幅 > {BIG_GAIN_THRESHOLD}%）")
+    print(f"   • 上根小幅震荡（振幅 < {CONSOL_AMP_THRESHOLD}%，收盘不低于大涨K线收盘的{CONSOL_CLOSE_RATIO*100}%）")
+    print(f"   • 上根收盘价 > MA5，且 MA5 > MA10 ≥ MA20")
     print(f"   • 上根KDJ满足 J > K > D")
-    print(f"📊 排序：按上上上根和上上上上根4小时K棒的收盘价累计涨幅从高到低")
+    print(f"📊 排序：按上上上根和上上上上根4小时K棒累计涨幅从高到低")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
 
@@ -128,17 +131,15 @@ def main():
         return
 
     # 计算目标K线时间戳
-    # 上根: offset=-1, 上上根: offset=-2, 上上上根: offset=-3, 上上上上根: offset=-4
-    prev1_ts = get_4h_period_start_timestamp(beijing_now, -1)   # 上根
-    prev2_ts = get_4h_period_start_timestamp(beijing_now, -2)   # 上上根
-    prev3_ts = get_4h_period_start_timestamp(beijing_now, -3)   # 上上上根
-    prev4_ts = get_4h_period_start_timestamp(beijing_now, -4)   # 上上上上根
+    prev1_ts = get_4h_period_start_timestamp(beijing_now, -1)   # 上根（震荡）
+    prev2_ts = get_4h_period_start_timestamp(beijing_now, -2)   # 上上根（大涨）
+    prev3_ts = get_4h_period_start_timestamp(beijing_now, -3)   # 上上上根（用于排序）
+    prev4_ts = get_4h_period_start_timestamp(beijing_now, -4)   # 上上上上根（用于排序）
 
     print("📅 目标K线时间段（北京时间）:")
-    print(f"   上根: {ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts)+timedelta(hours=4)).strftime('%H:%M')}")
-    print(f"   上上根: {ts_to_beijing(prev2_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev2_ts)+timedelta(hours=4)).strftime('%H:%M')}")
-    print(f"   上上上根: {ts_to_beijing(prev3_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev3_ts)+timedelta(hours=4)).strftime('%H:%M')}")
-    print(f"   上上上上根: {ts_to_beijing(prev4_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev4_ts)+timedelta(hours=4)).strftime('%H:%M')}")
+    print(f"   上根(震荡): {ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts)+timedelta(hours=4)).strftime('%H:%M')}")
+    print(f"   上上根(大涨): {ts_to_beijing(prev2_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev2_ts)+timedelta(hours=4)).strftime('%H:%M')}")
+    print(f"   排序用K线: {ts_to_beijing(prev4_ts).strftime('%Y-%m-%d %H:%M')} 和 {ts_to_beijing(prev3_ts).strftime('%Y-%m-%d %H:%M')}")
 
     print("⏳ 正在获取K线数据...")
     result_list = []
@@ -149,7 +150,6 @@ def main():
             if len(ohlcv) < 30:
                 continue
 
-            # 查找目标K线
             k1 = find_kline_by_timestamp(ohlcv, prev1_ts)  # 上根
             k2 = find_kline_by_timestamp(ohlcv, prev2_ts)  # 上上根
             k3 = find_kline_by_timestamp(ohlcv, prev3_ts)  # 上上上根
@@ -157,31 +157,40 @@ def main():
             if not (k1 and k2 and k3 and k4):
                 continue
 
-            close1 = k1[4]
-            close2, high2, low2 = k2[4], k2[2], k2[3]
-            high3, low3 = k3[2], k3[3]
-            close3 = k3[4]
-            close4 = k4[4]
+            # 上上根（大涨K线）数据
+            open2 = k2[1]
+            close2 = k2[4]
+            high2 = k2[2]
+            low2 = k2[3]
+            gain2 = (close2 - open2) / open2 * 100   # 自身涨幅
 
-            # 条件1：均线条件（基于上根）
+            # 上根（震荡K线）数据
+            open1 = k1[1]
+            close1 = k1[4]
+            high1 = k1[2]
+            low1 = k1[3]
+            amp1 = (high1 - low1) / low1 * 100       # 振幅
+
+            # 条件1：上上根大涨
+            if gain2 < BIG_GAIN_THRESHOLD:
+                continue
+
+            # 条件2：上根小幅震荡 + 收盘不深跌
+            if amp1 >= CONSOL_AMP_THRESHOLD:
+                continue
+            if close1 < close2 * CONSOL_CLOSE_RATIO:
+                continue
+
+            # 条件3：均线多头（基于上根）
             ma5 = calculate_ma_for_target_kline(ohlcv, prev1_ts, 5)
             ma10 = calculate_ma_for_target_kline(ohlcv, prev1_ts, 10)
             ma20 = calculate_ma_for_target_kline(ohlcv, prev1_ts, 20)
             if ma5 is None or ma10 is None or ma20 is None:
                 continue
-            # MA5 > MA10 >= MA20
             if not (close1 > ma5 and ma5 > ma10 and ma10 >= ma20):
                 continue
 
-            # 条件2：上上根震荡（相对于上上上根）
-            if not is_consolidation_kline(close2, high3, low3):
-                continue
-
-            # 条件3：上根震荡（相对于上上根）
-            if not is_consolidation_kline(close1, high2, low2):
-                continue
-
-            # 条件4：KDJ J > K > D（上根）
+            # 条件4：KDJ J > K > D
             closes = [k[4] for k in ohlcv]
             highs = [k[2] for k in ohlcv]
             lows = [k[3] for k in ohlcv]
@@ -189,28 +198,26 @@ def main():
             idx1 = next((i for i, k in enumerate(ohlcv) if k[0] == prev1_ts), None)
             if idx1 is None or k_vals[idx1] is None or d_vals[idx1] is None or j_vals[idx1] is None:
                 continue
-            k_val = k_vals[idx1]
-            d_val = d_vals[idx1]
-            j_val = j_vals[idx1]
-            if not (j_val > k_val > d_val):
+            if not (j_vals[idx1] > k_vals[idx1] > d_vals[idx1]):
                 continue
 
-            # 排序指标：上上上根和上上上上根的收盘价累计涨幅
-            if close4 == 0:
+            # 排序指标：上上上根和上上上上根的累计涨幅
+            if k4[4] == 0:
                 continue
-            gain_sort = (close3 - close4) / close4 * 100
+            gain_sort = (k3[4] - k4[4]) / k4[4] * 100
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'gain_sort': round(gain_sort, 2),
+                'gain2': round(gain2, 2),
+                'amp1': round(amp1, 2),
                 'ma5': round(ma5, 4),
                 'ma10': round(ma10, 4),
                 'ma20': round(ma20, 4),
                 'close1': round(close1, 4),
-                'close2': round(close2, 4),
-                'k_val': round(k_val, 2),
-                'd_val': round(d_val, 2),
-                'j_val': round(j_val, 2),
+                'k_val': round(k_vals[idx1], 2),
+                'd_val': round(d_vals[idx1], 2),
+                'j_val': round(j_vals[idx1], 2),
             })
 
             if (idx+1) % 50 == 0:
@@ -220,17 +227,17 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按涨幅从高到低排序
     result_list.sort(key=lambda x: x['gain_sort'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时级别扫描（第五个工作流）",
+        f"📊 Bitget 4小时级别扫描（大涨后震荡版）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根收盘价 > MA5，且 MA5 > MA10 ≥ MA20",
-        f"   • 上根和上上根均处于震荡",
+        f"   • 上上根大涨 > {BIG_GAIN_THRESHOLD}%",
+        f"   • 上根振幅 < {CONSOL_AMP_THRESHOLD}%，收盘不低于大涨K线收盘的{CONSOL_CLOSE_RATIO*100}%",
+        f"   • 上根收盘 > MA5，且 MA5 > MA10 ≥ MA20",
         f"   • 上根KDJ: J > K > D",
         f"📊 排序：按上上上根和上上上上根4小时K棒累计涨幅从高到低",
         f"━━━━━━━━━━━━━━━━━━━━"
@@ -241,14 +248,15 @@ def main():
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   排序涨幅: +{item['gain_sort']}%\n"
+                f"   上上根涨幅: +{item['gain2']}%  ✅\n"
+                f"   上根振幅: {item['amp1']}% (<{CONSOL_AMP_THRESHOLD}%)\n"
                 f"   均线: MA5={item['ma5']}, MA10={item['ma10']}, MA20={item['ma20']}\n"
-                f"   上根收盘: {item['close1']} > MA5 ✅, MA5>MA10 ✅, MA10≥MA20 ✅\n"
-                f"   上上根震荡: {item['close2']} ∈ 前根区间\n"
+                f"   上根收盘: {item['close1']} > MA5 ✅, MA5>MA10≥MA20 ✅\n"
                 f"   KDJ: K={item['k_val']}, D={item['d_val']}, J={item['j_val']} (J>K>D ✅)"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：短期均线强势（MA5>MA10≥MA20）+ 双K线震荡 + KDJ金叉，且前两周期涨幅领先")
+        msg_lines.append("💡 解读：大涨后小幅震荡，均线多头+KDJ金叉，大概率继续上涨")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
