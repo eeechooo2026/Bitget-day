@@ -1,9 +1,7 @@
-name: Bitget 第十一个工作流 - 4小时级别空头扫描（基于第五个逻辑）
+name: Bitget 11th工作流 - 4小时级别双震荡空头扫描
 
 on:
   schedule:
-    # 每天北京时间 8:01, 12:01, 16:01, 20:01, 00:01
-    # 对应 UTC 0:01, 4:01, 8:01, 12:01, 16:01
     - cron: '1 0,4,8,12,16 * * *'
   workflow_dispatch:
 
@@ -16,5 +14,5 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install -r requirements.txt
-      - name: Run 11th workflow scan
-        run: python scanner_11th_workflow.py
+      - name: Run 5th bearish workflow scan
+        run: python scanner_5th_bearish.py
