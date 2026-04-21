@@ -110,7 +110,7 @@ def main():
     beijing_now = utc_now + timedelta(hours=8)
     print(f"🚀 开始第五个工作流扫描 - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上根4小时K棒收盘价 > MA5，且 MA5 > MA10，MA5 > MA20")
+    print(f"   • 上根4小时K棒收盘价 > MA5，且 MA5 > MA10 ≥ MA20")
     print(f"   • 上根和上上根4小时K棒均处于震荡（收盘价落于前一根区间内）")
     print(f"   • 上根KDJ满足 J > K > D")
     print(f"📊 排序：按上上上根和上上上上根4小时K棒的收盘价累计涨幅从高到低")
@@ -145,7 +145,6 @@ def main():
 
     for idx, symbol in enumerate(swap_symbols):
         try:
-            # 获取足够多的4小时K线（需要至少20根用于MA计算）
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=100)
             if len(ohlcv) < 30:
                 continue
@@ -161,8 +160,8 @@ def main():
             close1 = k1[4]
             close2, high2, low2 = k2[4], k2[2], k2[3]
             high3, low3 = k3[2], k3[3]
-            close3 = k3[4]   # 上上上根收盘价
-            close4 = k4[4]   # 上上上上根收盘价
+            close3 = k3[4]
+            close4 = k4[4]
 
             # 条件1：均线条件（基于上根）
             ma5 = calculate_ma_for_target_kline(ohlcv, prev1_ts, 5)
@@ -170,7 +169,8 @@ def main():
             ma20 = calculate_ma_for_target_kline(ohlcv, prev1_ts, 20)
             if ma5 is None or ma10 is None or ma20 is None:
                 continue
-            if not (close1 > ma5 and ma5 > ma10 and ma5 > ma20):
+            # MA5 > MA10 >= MA20
+            if not (close1 > ma5 and ma5 > ma10 and ma10 >= ma20):
                 continue
 
             # 条件2：上上根震荡（相对于上上上根）
@@ -229,7 +229,7 @@ def main():
         f"📊 Bitget 4小时级别扫描（第五个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根收盘价 > MA5，且 MA5 > MA10，MA5 > MA20",
+        f"   • 上根收盘价 > MA5，且 MA5 > MA10 ≥ MA20",
         f"   • 上根和上上根均处于震荡",
         f"   • 上根KDJ: J > K > D",
         f"📊 排序：按上上上根和上上上上根4小时K棒累计涨幅从高到低",
@@ -242,13 +242,13 @@ def main():
                 f"{i}. {item['symbol']}\n"
                 f"   排序涨幅: +{item['gain_sort']}%\n"
                 f"   均线: MA5={item['ma5']}, MA10={item['ma10']}, MA20={item['ma20']}\n"
-                f"   上根收盘: {item['close1']} > MA5 ✅, MA5>MA10 ✅, MA5>MA20 ✅\n"
+                f"   上根收盘: {item['close1']} > MA5 ✅, MA5>MA10 ✅, MA10≥MA20 ✅\n"
                 f"   上上根震荡: {item['close2']} ∈ 前根区间\n"
                 f"   KDJ: K={item['k_val']}, D={item['d_val']}, J={item['j_val']} (J>K>D ✅)"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：短期均线强势 + 双K线震荡 + KDJ金叉，且前两周期涨幅领先")
+        msg_lines.append("💡 解读：短期均线强势（MA5>MA10≥MA20）+ 双K线震荡 + KDJ金叉，且前两周期涨幅领先")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 今日未找到符合条件的币种")
