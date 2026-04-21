@@ -1,22 +1,18 @@
-执行时间：北京时间每天 8:01, 12:01, 16:01, 20:01, 00:01
-（对应 UTC 0:01, 4:01, 8:01, 12:01, 16:01）
+name: Bitget 第五个工作流 - 4小时级别扫描（收盘价>MA5+震荡+J>K>D）
 
-筛选范围：Bitget 交易所所有 USDT 本位永续合约
+on:
+  schedule:
+    - cron: '1 0,4,8,12,16 * * *'
+  workflow_dispatch:
 
-条件1：4小时图三均线多头排列
-
-MA5 > MA10 > MA20
-
-且上根K棒收盘价 > MA5
-
-条件2：上根和上上根4小时K棒均处于震荡
-
-各自收盘价 < 各自上根K棒的最高价
-
-且各自收盘价 > 各自上根K棒的最低价
-
-条件3：上根4小时K棒的KDJ的J值 > 上上根
-
-排序：按照前两根日线K棒（昨天和前天）的收盘价累计涨幅从高到低
-
-推送：前十名
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 5th workflow scan
+        run: python scanner_5th_workflow.py
