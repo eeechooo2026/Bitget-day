@@ -1,8 +1,7 @@
-name: Bitget 第七个工作流 - 4小时级别扫描
+name: Bitget 第七个工作流 - 4小时级别扫描（收阳+低点降低+KDJ条件）
 
 on:
   schedule:
-    # 每天北京时间 8:01, 12:01, 16:01, 20:01, 00:01
     - cron: '1 0,4,8,12,16 * * *'
   workflow_dispatch:
 
