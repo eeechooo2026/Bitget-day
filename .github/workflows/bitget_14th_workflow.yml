@@ -1,0 +1,18 @@
+name: Bitget 第14个工作流 - 4小时级别涨幅榜
+
+on:
+  schedule:
+    - cron: '1 0,4,8,12,16 * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 14th workflow scan
+        run: python scanner_14th_workflow.py
