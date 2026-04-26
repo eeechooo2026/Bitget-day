@@ -33,11 +33,11 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第16个工作流扫描（1小时涨幅榜 - 手动运行）")
+    print(f"🚀 开始第16个工作流扫描（1小时双K线涨幅榜 - 手动运行）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 扫描所有USDT本位永续合约")
-    print(f"   • 按上根1小时K棒涨幅从高到低排序")
+    print(f"   • 按前两根1小时K棒（上根 + 上上根）的涨幅总和从高到低排序")
     print(f"📊 输出：前十名（仅控制台，不推送微信）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -52,38 +52,54 @@ def main():
         print("❌ 未找到合约交易对")
         return
 
-    # 目标K线时间戳（上根1小时）
-    prev1_ts = get_1h_period_start_timestamp(beijing_now, -1)
+    # 目标K线时间戳（上根和上上根）
+    prev1_ts = get_1h_period_start_timestamp(beijing_now, -1)   # 上根
+    prev2_ts = get_1h_period_start_timestamp(beijing_now, -2)   # 上上根
 
     print(f"📅 目标K线时间段（北京时间）:")
     print(f"   上根1小时: {ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts)+timedelta(hours=1)).strftime('%H:%M')}")
+    print(f"   上上根1小时: {ts_to_beijing(prev2_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev2_ts)+timedelta(hours=1)).strftime('%H:%M')}")
 
     print("⏳ 正在获取K线数据...")
     result_list = []
 
     for idx, symbol in enumerate(swap_symbols):
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1H, limit=5)
-            if len(ohlcv) < 2:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1H, limit=10)
+            if len(ohlcv) < 3:
                 continue
 
-            k1 = find_kline_by_timestamp(ohlcv, prev1_ts)
-            if k1 is None:
+            k1 = find_kline_by_timestamp(ohlcv, prev1_ts)   # 上根
+            k2 = find_kline_by_timestamp(ohlcv, prev2_ts)   # 上上根
+            if k1 is None or k2 is None:
                 continue
 
+            # 上根涨幅
             open1 = k1[1]
             close1 = k1[4]
             if open1 == 0:
                 continue
+            gain1 = (close1 - open1) / open1 * 100
 
-            # 计算涨幅
-            gain = (close1 - open1) / open1 * 100
+            # 上上根涨幅
+            open2 = k2[1]
+            close2 = k2[4]
+            if open2 == 0:
+                continue
+            gain2 = (close2 - open2) / open2 * 100
+
+            # 总涨幅
+            total_gain = gain1 + gain2
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'gain': round(gain, 2),
+                'gain1': round(gain1, 2),
+                'gain2': round(gain2, 2),
+                'total_gain': round(total_gain, 2),
                 'open1': round(open1, 4),
                 'close1': round(close1, 4),
+                'open2': round(open2, 4),
+                'close2': round(close2, 4),
             })
 
             if (idx+1) % 50 == 0:
@@ -93,19 +109,20 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按涨幅从高到低排序
-    result_list.sort(key=lambda x: x['gain'], reverse=True)
+    # 按总涨幅从高到低排序
+    result_list.sort(key=lambda x: x['total_gain'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
     print("\n" + "="*60)
-    print(f"📊 Bitget 1小时级别涨幅榜（共{len(result_list)}个合约）")
-    print(f"📈 上根1小时K棒涨幅排行榜 Top {len(top)}")
+    print(f"📊 Bitget 1小时级别双K线涨幅榜（共{len(result_list)}个合约）")
+    print(f"📈 前两根1小时K棒涨幅总和排行榜 Top {len(top)}")
     print("="*60)
     if top:
         for i, item in enumerate(top, 1):
             print(f"{i}. {item['symbol']}")
-            print(f"   涨幅: +{item['gain']}%")
-            print(f"   开盘: {item['open1']} → 收盘: {item['close1']}")
+            print(f"   上根涨幅: +{item['gain1']}%  ({item['open1']} → {item['close1']})")
+            print(f"   上上根涨幅: +{item['gain2']}%  ({item['open2']} → {item['close2']})")
+            print(f"   总涨幅: +{item['total_gain']}%")
             print("-"*40)
     else:
         print("😔 未找到K线数据")
