@@ -1,0 +1,18 @@
+name: Bitget 第17个工作流 - 4小时级别（突破前高但低于MA20）
+
+on:
+  schedule:
+    - cron: '1 0,4,8,12,16 * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 17th workflow scan
+        run: python scanner_17th_workflow.py
