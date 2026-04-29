@@ -1,4 +1,4 @@
-name: Bitget 第19个工作流 - 现货日线跌幅榜（优化版）
+name: Bitget 第19个工作流 - 合约日线跌幅榜（全量版）
 
 on:
   schedule:
