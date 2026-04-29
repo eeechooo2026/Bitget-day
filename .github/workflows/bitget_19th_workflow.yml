@@ -1,0 +1,18 @@
+name: Bitget 第19个工作流 - 现货日线跌幅榜（优化版）
+
+on:
+  schedule:
+    - cron: '1 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 19th workflow scan
+        run: python scanner_19th_workflow.py
