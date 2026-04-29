@@ -10,7 +10,6 @@ WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
 PUSH_TOP_N = 10
 TIMEFRAME_1D = '1d'
-TOP_VOLUME = 100            # 只分析成交量前100的现货交易对
 # =============================================
 
 def send_push_wxpusher(message):
@@ -54,50 +53,38 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第19个工作流扫描（现货日线跌幅榜 - 优化版）")
+    print(f"🚀 开始第19个工作流扫描（合约日线跌幅榜 - 全量扫描）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📉 策略逻辑：")
-    print(f"   • 按24h成交量排序，取前{TOP_VOLUME}个USDT本位现货交易对")
+    print(f"   • 扫描所有USDT本位永续合约")
     print(f"   • 按上根日线K棒跌幅从高到低排序")
     print(f"📊 推送：前十名")
 
     exchange = ccxt.bitget({
         'enableRateLimit': True,
-        'options': {'defaultType': 'spot'}
+        'options': {'defaultType': 'swap'}
     })
 
-    print("📡 第一步：获取所有现货Ticker（用于成交量排序）...")
-    tickers = exchange.fetch_tickers()
-    print(f"📊 共获取 {len(tickers)} 个交易对")
+    print("📡 正在加载合约市场数据...")
+    markets = exchange.load_markets()
+    print(f"📊 共加载 {len(markets)} 个交易对")
+    # 筛选 USDT 本位永续合约
+    swap_symbols = [s for s, m in markets.items() if m['type'] == 'swap' and s.endswith('/USDT:USDT')]
+    print(f"📊 共找到 {len(swap_symbols)} 个 USDT 本位永续合约")
 
-    # 筛选 USDT 本位现货交易对，并提取成交量
-    usdt_tickers = []
-    for symbol, ticker in tickers.items():
-        if symbol.endswith('/USDT') and ticker.get('quoteVolume') is not None:
-            usdt_tickers.append({
-                'symbol': symbol,
-                'volume': ticker['quoteVolume']  # 24h成交额（USDT）
-            })
-    print(f"📊 共找到 {len(usdt_tickers)} 个 USDT 本位现货交易对")
-
-    if len(usdt_tickers) == 0:
-        print("❌ 未找到现货交易对")
+    if len(swap_symbols) == 0:
+        print("❌ 未找到合约交易对")
         return
-
-    # 按成交量降序排序，取前 TOP_VOLUME 个
-    usdt_tickers.sort(key=lambda x: x['volume'], reverse=True)
-    top_symbols = [item['symbol'] for item in usdt_tickers[:TOP_VOLUME]]
-    print(f"✅ 按24h成交量排序，取前 {len(top_symbols)} 个交易对")
 
     # 目标K线时间戳（上根日线 = 昨天）
     prev1_ts = get_daily_period_start_timestamp(beijing_now, -1)
     target_date = ts_to_beijing(prev1_ts).strftime('%Y-%m-%d')
     print(f"📅 目标K线时间段（北京时间）: {target_date}")
 
-    print("⏳ 第二步：获取这些交易对的日线K线数据...")
+    print("⏳ 正在获取K线数据...")
     result_list = []
 
-    for idx, symbol in enumerate(top_symbols):
+    for idx, symbol in enumerate(swap_symbols):
         try:
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=5)
             if len(ohlcv) < 2:
@@ -115,14 +102,14 @@ def main():
             change = (close1 - open1) / open1 * 100
 
             result_list.append({
-                'symbol': symbol.replace('/USDT', ''),
+                'symbol': symbol.replace('/USDT:USDT', ''),
                 'change': round(change, 2),
-                'open1': round(open1, 8),
-                'close1': round(close1, 8),
+                'open1': round(open1, 4),
+                'close1': round(close1, 4),
             })
 
-            if (idx+1) % 20 == 0:
-                print(f"   进度: {idx+1}/{len(top_symbols)}")
+            if (idx+1) % 50 == 0:
+                print(f"进度: {idx+1}/{len(swap_symbols)}")
             time.sleep(0.1)
         except Exception as e:
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
@@ -134,15 +121,15 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📉 Bitget 现货日线跌幅榜（第19个工作流 - 优化版）",
+        f"📉 Bitget 合约日线跌幅榜（第19个工作流 - 全量版）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📉 策略逻辑：",
-        f"   • 扫描成交量前{TOP_VOLUME}的USDT本位现货交易对",
+        f"   • 扫描所有USDT本位永续合约",
         f"   • 按上根日线K棒跌幅从高到低排序",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 跌幅榜前十名（共{len(result_list)}个交易对）：")
+        msg_lines.append(f"📋 跌幅榜前十名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
