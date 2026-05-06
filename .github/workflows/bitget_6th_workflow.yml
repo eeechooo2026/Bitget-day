@@ -1,10 +1,9 @@
-name: Bitget 第六个工作流 - 1小时级别扫描
+name: Bitget 第六个工作流 - 1小时级别扫描（随机排序）
 
 on:
   schedule:
-    # 每小时运行一次 (UTC时间)
-    # 北京时间是整点后的01分开始扫描，确保上一个小时K线已完全收盘
-    - cron: '1 * * * *'
+    # 北京时间每个整点 = UTC 前1小时的00分
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
