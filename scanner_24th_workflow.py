@@ -58,13 +58,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第24个工作流扫描（15分钟跌幅×杠杆/100排序）")
+    print(f"🚀 开始第24个工作流扫描（仅15分钟下跌K棒，按 |跌幅|×杠杆/100 排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 扫描所有USDT本位永续合约")
+    print(f"   • 只保留上根15分钟K棒下跌（涨跌幅 < 0）的币种")
     print(f"   • 计算指标 = |跌幅| × (最高杠杆倍数 / 100)")
     print(f"   • 按该指标从高到低排序")
-    print(f"   • 附：每个币种的最高杠杆倍数")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -119,8 +119,12 @@ def main():
                 continue
 
             change = (close1 - open1) / open1 * 100   # 涨跌幅，负值为跌
+
+            # 只保留下跌的K线
+            if change >= 0:
+                continue
+
             leverage = leverage_info[symbol]
-            # 公式：|跌幅| * (杠杆 / 100)
             score = abs(change) * (leverage / 100)
 
             result_list.append({
@@ -145,17 +149,15 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 15分钟级别（|跌幅| × 杠杆/100）排行（第24个工作流）",
+        f"📊 Bitget 15分钟级别（仅下跌，|跌幅|×杠杆/100排序）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 扫描所有USDT本位永续合约",
-        f"   • 计算指标 = |上根15分钟K棒跌幅| × (最高杠杆倍数 / 100)",
-        f"   • 按该指标从高到低排序",
-        f"   • 附：每个币种的最高合约杠杆倍数",
+        f"   • 只保留上根15分钟K棒下跌（涨跌幅 < 0）的币种",
+        f"   • 排序指标 = |跌幅| × (最高杠杆倍数 / 100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 排行榜前十名（共{len(result_list)}个合约）：")
+        msg_lines.append(f"📋 下跌波动最大前十名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
@@ -165,10 +167,10 @@ def main():
                 f"   开盘: {item['open1']} → 收盘: {item['close1']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
-        msg_lines.append("💡 解读：指标值 = |跌幅| × (杠杆/100)，反映单位保证金下的波动幅度")
+        msg_lines.append("💡 解读：指标值 = |跌幅| × (杠杆/100)，反映单位保证金下的下跌波动")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
-        msg_lines.append("😔 未找到K线数据")
+        msg_lines.append("😔 未找到符合条件的下跌币种")
 
     message = "\n".join(msg_lines)
     print("\n" + "="*50)
