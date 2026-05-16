@@ -1,4 +1,4 @@
-name: Bitget 第21个工作流 - 1小时级别跌幅榜（手动触发）
+name: Bitget 第25个工作流 - 1小时级别（仅下跌K棒，按|跌幅|×杠杆/100排序，手动触发）
 
 on:
   workflow_dispatch:
@@ -12,5 +12,5 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install -r requirements.txt
-      - name: Run 21st workflow scan
-        run: python scanner_21st_workflow.py
+      - name: Run 25th workflow scan
+        run: python scanner_25th_workflow.py
