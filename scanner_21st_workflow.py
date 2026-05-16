@@ -58,12 +58,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第21个工作流扫描（1小时跌幅榜 + 杠杆信息）")
+    print(f"🚀 开始第25个工作流扫描（仅1小时下跌K棒，按 |跌幅|×杠杆/100 排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📉 策略逻辑：")
+    print(f"📈 策略逻辑：")
     print(f"   • 扫描所有USDT本位永续合约")
-    print(f"   • 按上根1小时K棒跌幅从高到低排序")
-    print(f"   • 附加显示每个币种的最高杠杆倍数")
+    print(f"   • 只保留上根1小时K棒下跌（涨跌幅 < 0）的币种")
+    print(f"   • 计算指标 = |跌幅| × (最高杠杆倍数 / 100)")
+    print(f"   • 按该指标从高到低排序")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -78,7 +79,6 @@ def main():
     for symbol, market in markets.items():
         if market.get('type') == 'swap' and symbol.endswith('/USDT:USDT'):
             max_leverage = 0
-            # 尝试从不同字段获取最大杠杆信息
             if 'limits' in market and 'leverage' in market['limits'] and 'max' in market['limits']['leverage']:
                 max_leverage = float(market['limits']['leverage']['max'])
             elif 'info' in market and 'maxLeverage' in market['info']:
@@ -96,8 +96,9 @@ def main():
 
     # 目标K线时间戳（上根1小时）
     prev1_ts = get_1h_period_start_timestamp(beijing_now, -1)
-    target_period = ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')
-    print(f"📅 目标K线时间段（北京时间）: {target_period} - {(ts_to_beijing(prev1_ts)+timedelta(hours=1)).strftime('%H:%M')}")
+    target_start = ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')
+    target_end = (ts_to_beijing(prev1_ts) + timedelta(hours=1)).strftime('%H:%M')
+    print(f"📅 目标K线时间段（北京时间）: {target_start} - {target_end}")
 
     print("⏳ 正在获取K线数据...")
     result_list = []
@@ -117,12 +118,20 @@ def main():
             if open1 == 0:
                 continue
 
-            change = (close1 - open1) / open1 * 100
+            change = (close1 - open1) / open1 * 100   # 涨跌幅，负值为跌
+
+            # 只保留下跌的K线
+            if change >= 0:
+                continue
+
+            leverage = leverage_info[symbol]
+            score = abs(change) * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'change': round(change, 2),
-                'leverage': round(leverage_info[symbol]),
+                'leverage': round(leverage),
+                'score': round(score, 4),
                 'open1': round(open1, 4),
                 'close1': round(close1, 4),
             })
@@ -134,34 +143,34 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按跌幅从高到低排序（即 change 从小到大，最负的排前面）
-    result_list.sort(key=lambda x: x['change'])
+    # 按 score 从高到低排序
+    result_list.sort(key=lambda x: x['score'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📉 Bitget 1小时级别跌幅榜（第21个工作流）",
+        f"📊 Bitget 1小时级别（仅下跌，|跌幅|×杠杆/100排序）",
         f"🕘 时间：{current_time}（北京时间）",
-        f"📉 策略逻辑：",
-        f"   • 扫描所有USDT本位永续合约",
-        f"   • 按上根1小时K棒跌幅从高到低排序",
-        f"   • 附：每个币种的最高合约杠杆倍数",
+        f"📈 策略逻辑：",
+        f"   • 只保留上根1小时K棒下跌（涨跌幅 < 0）的币种",
+        f"   • 排序指标 = |跌幅| × (最高杠杆倍数 / 100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 跌幅榜前十名（共{len(result_list)}个合约）：")
+        msg_lines.append(f"📋 下跌波动最大前十名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   涨跌幅: {item['change']}%\n"
                 f"   最高杠杆: {item['leverage']}x\n"
+                f"   指标值: {item['score']}\n"
                 f"   开盘: {item['open1']} → 收盘: {item['close1']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
-        msg_lines.append("💡 解读：上根1小时K棒跌幅排名，杠杆倍数仅供参考")
+        msg_lines.append("💡 解读：指标值 = |跌幅| × (杠杆/100)，反映单位保证金下的下跌波动")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
-        msg_lines.append("😔 未找到K线数据")
+        msg_lines.append("😔 未找到符合条件的下跌币种")
 
     message = "\n".join(msg_lines)
     print("\n" + "="*50)
