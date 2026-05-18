@@ -1,0 +1,16 @@
+name: Bitget 第29个工作流 - 1小时级别K线形态扫描（手动触发）
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 29th workflow scan
+        run: python scanner_29th_workflow.py
