@@ -10,7 +10,6 @@ WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
 PUSH_TOP_N = 10
 TIMEFRAME_1H = '1h'
-MA20_PERIOD = 20
 KDJ_RSV_PERIOD = 9
 KDJ_SMOOTH = 3
 # =============================================
@@ -55,17 +54,6 @@ def find_kline_by_timestamp(ohlcv, target_ts):
             return k
     return None
 
-def calculate_ma_for_target_kline(ohlcv, target_ts, period):
-    target_idx = None
-    for i, k in enumerate(ohlcv):
-        if k[0] == target_ts:
-            target_idx = i
-            break
-    if target_idx is None or target_idx < period - 1:
-        return None
-    closes = [ohlcv[j][4] for j in range(target_idx - period + 1, target_idx + 1)]
-    return sum(closes) / period
-
 def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     n = len(closes)
     k_values = [None] * n
@@ -97,12 +85,11 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第28个工作流扫描（1小时KDJ死叉 + J值前高 + 收盘<MA20 + 按上根振幅×杠杆/100排序）")
+    print(f"🚀 开始第28个工作流扫描（1小时KDJ死叉 + J值前高 + 按上根振幅×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 1小时级别：上根J值 < 上上根J值（死叉）")
     print(f"   • 1小时级别：上上根J值 > 上上上根J值（前高）")
-    print(f"   • 1小时级别：上根收盘价 < MA20")
     print(f"   • 排序指标 = |上根1小时K棒振幅| × (最高杠杆倍数 / 100)")
     print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
     print(f"📊 推送：前十名（微信推送）")
@@ -160,7 +147,6 @@ def main():
             if not (k1 and k2 and k3):
                 continue
 
-            close1 = k1[4]     # 上根收盘价
             high1 = k1[2]      # 上根最高价
             low1 = k1[3]       # 上根最低价
 
@@ -187,11 +173,6 @@ def main():
             if j2 <= j3:
                 continue
 
-            # 条件3：上根收盘价 < MA20
-            ma20 = calculate_ma_for_target_kline(ohlcv, prev1_ts, MA20_PERIOD)
-            if ma20 is None or close1 >= ma20:
-                continue
-
             # ========== 排序指标：上根振幅 × 杠杆/100 ==========
             if low1 == 0:
                 continue
@@ -204,8 +185,6 @@ def main():
                 'j3': round(j3, 2),
                 'j2': round(j2, 2),
                 'j1': round(j1, 2),
-                'close1': round(close1, 4),
-                'ma20': round(ma20, 4),
                 'amplitude': round(amplitude, 2),
                 'leverage': round(leverage),
                 'score': round(score, 4),
@@ -224,12 +203,11 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 1小时级别KDJ死叉+前高+收盘<MA20扫描（第28个工作流）",
+        f"📊 Bitget 1小时级别KDJ死叉+前高扫描（第28个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 1小时KDJ死叉：上根J值 < 上上根J值",
         f"   • 1小时J值前高：上上根J值 > 上上上根J值",
-        f"   • 收盘价 < MA20",
         f"   • 排序 = 上根振幅 × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -240,13 +218,12 @@ def main():
                 f"{i}. {item['symbol']}\n"
                 f"   J值: {item['j3']} → {item['j2']} → {item['j1']}\n"
                 f"   J2>J3 ✅, J1<J2 ✅\n"
-                f"   收盘 {item['close1']} < MA20({item['ma20']})\n"
                 f"   振幅: {item['amplitude']}%, 杠杆: {item['leverage']}x\n"
                 f"   排序值: {item['score']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：1小时KDJ死叉确认 + MA20下方 + 振幅×杠杆排序")
+        msg_lines.append("💡 解读：1小时KDJ死叉确认 + 振幅×杠杆排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
