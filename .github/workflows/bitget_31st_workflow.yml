@@ -1,0 +1,16 @@
+name: Bitget 第31个工作流 - 1小时级别KDJ金叉+前低扫描（手动触发）
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 31st workflow scan
+        run: python scanner_31st_workflow.py
