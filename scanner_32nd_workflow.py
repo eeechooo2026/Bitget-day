@@ -78,7 +78,7 @@ def main():
     print(f"🚀 开始第32个工作流扫描（1小时均线多头 + 上根收阴 + 上上根收阳 + 按上上根振幅×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 1小时级别：均线多头排列（MA5 > MA10 > MA20），且上根收盘价 > MA5")
+    print(f"   • 1小时级别：均线多头排列（MA5 > MA10 > MA20）")
     print(f"   • 上根K棒收阴（收盘价 < 开盘价）")
     print(f"   • 上上根K棒收阳（收盘价 > 开盘价）")
     print(f"   • 排序指标 = 上上根振幅 × (最高杠杆倍数 / 100)")
@@ -153,8 +153,6 @@ def main():
             ma20 = calculate_ma_for_target_kline(ohlcv, prev1_ts, 20)
             if not is_bullish_arrangement(ma5, ma10, ma20):
                 continue
-            if close1 <= ma5:
-                continue
 
             # 条件2：上根收阴（收盘价 < 开盘价）
             if close1 >= open1:
@@ -201,7 +199,7 @@ def main():
         f"📊 Bitget 1小时级别均线多头+阴阳形态扫描（第32个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 均线多头排列：MA5 > MA10 > MA20，且上根收盘价 > MA5",
+        f"   • 均线多头排列：MA5 > MA10 > MA20",
         f"   • 上根收阴（收盘 < 开盘）",
         f"   • 上上根收阳（收盘 > 开盘）",
         f"   • 排序 = 上上根振幅 × (杠杆/100)",
