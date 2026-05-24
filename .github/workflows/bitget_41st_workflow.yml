@@ -1,0 +1,16 @@
+name: Bitget 第41个工作流 - 日线级别空头版（上根收阴+收盘>MA20）扫描（手动触发）
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 41st workflow scan
+        run: python scanner_41st_workflow.py
