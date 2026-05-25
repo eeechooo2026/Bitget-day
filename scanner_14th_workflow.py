@@ -70,8 +70,7 @@ def main():
     print(f"🚀 开始第14个工作流扫描 - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 扫描所有USDT本位永续合约")
-    print(f"   • 计算指标 = |上根4小时K棒涨幅| × (最高杠杆倍数 / 100)")
-    print(f"   • 按该指标从高到低排序")
+    print(f"   • 排序指标 = 上根4小时K棒涨幅 × (最高杠杆倍数 / 100)")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -128,7 +127,7 @@ def main():
             # 计算涨幅
             gain = (close1 - open1) / open1 * 100
             leverage = leverage_info[symbol]
-            score = abs(gain) * (leverage / 100)
+            score = gain * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
@@ -146,17 +145,17 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按 score 从高到低排序
+    # 按 score 从高到低排序（保留正负号，涨幅越大越靠前，跌幅越大越靠后）
     result_list.sort(key=lambda x: x['score'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时级别 |涨幅|×杠杆/100 排行（第14个工作流）",
+        f"📊 Bitget 4小时级别 涨幅×杠杆/100 排行（第14个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 扫描所有USDT本位永续合约",
-        f"   • 排序指标 = |上根4小时K棒涨幅| × (杠杆/100)",
+        f"   • 排序指标 = 上根4小时K棒涨幅 × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -171,7 +170,7 @@ def main():
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个合约")
-        msg_lines.append("💡 解读：指标值 = |涨幅| × (杠杆/100)，反映单位保证金下的波动幅度")
+        msg_lines.append("💡 解读：指标值 = 涨幅 × (杠杆/100)，正值为上涨贡献，负值为下跌贡献")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到K线数据")
