@@ -67,28 +67,44 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第18个工作流扫描（空头跌幅榜） - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📉 策略逻辑：")
+    print(f"🚀 开始第42个工作流扫描（空头版） - 当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📉 策略逻辑（空头）：")
     print(f"   • 扫描所有USDT本位永续合约")
-    print(f"   • 按上根4小时K棒跌幅从高到低排序")
-    print(f"📊 推送：前十名")
+    print(f"   • 排序指标 = 上根4小时K棒跌幅 × (最高杠杆倍数 / 100)")
+    print(f"   • 跌幅为负值，按指标值从低到高排序（跌幅最大的排最前）")
+    print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
 
     print("📡 正在加载合约市场数据...")
     markets = exchange.load_markets()
     print(f"📊 共加载 {len(markets)} 个交易对")
-    swap_symbols = [s for s, m in markets.items() if m['type'] == 'swap' and s.endswith('/USDT:USDT')]
-    print(f"📊 共找到 {len(swap_symbols)} 个 USDT 本位合约")
+
+    # 筛选 USDT 本位永续合约，并提取杠杆信息
+    swap_symbols = []
+    leverage_info = {}
+    for symbol, market in markets.items():
+        if market.get('type') == 'swap' and symbol.endswith('/USDT:USDT'):
+            max_leverage = 0
+            if 'limits' in market and 'leverage' in market['limits'] and 'max' in market['limits']['leverage']:
+                max_leverage = float(market['limits']['leverage']['max'])
+            elif 'info' in market and 'maxLeverage' in market['info']:
+                max_leverage = float(market['info']['maxLeverage'])
+            elif 'leverage' in market:
+                max_leverage = float(market['leverage']) if isinstance(market['leverage'], (int, float)) else 0
+            if max_leverage > 0:
+                swap_symbols.append(symbol)
+                leverage_info[symbol] = max_leverage
+    print(f"📊 共找到 {len(swap_symbols)} 个 USDT 本位永续合约（且有有效杠杆信息）")
 
     if len(swap_symbols) == 0:
         print("❌ 未找到合约交易对")
         return
 
-    # 目标K线时间戳（上根）
+    # 目标K线时间戳（上根4小时）
     prev1_ts = get_4h_period_start_timestamp(beijing_now, -1)
 
-    print(f"📅 目标K线时间段（北京时间）:")
+    print("📅 目标K线时间段（北京时间）:")
     print(f"   上根4小时: {ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts)+timedelta(hours=4)).strftime('%H:%M')}")
 
     print("⏳ 正在获取K线数据...")
@@ -109,12 +125,16 @@ def main():
             if open1 == 0:
                 continue
 
-            # 计算涨跌幅（负值表示下跌）
+            # 计算涨跌幅（负值为跌）
             change = (close1 - open1) / open1 * 100
+            leverage = leverage_info[symbol]
+            score = change * (leverage / 100)   # 跌幅时为负值
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'change': round(change, 2),
+                'leverage': round(leverage),
+                'score': round(score, 4),
                 'open1': round(open1, 4),
                 'close1': round(close1, 4),
             })
@@ -126,17 +146,18 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按跌幅从高到低排序（即 change 从小到大，最负的排前面）
-    result_list.sort(key=lambda x: x['change'])
+    # 按 score 从低到高排序（跌幅越大，score 越负，排越前）
+    result_list.sort(key=lambda x: x['score'])
     top = result_list[:PUSH_TOP_N]
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📉 Bitget 4小时级别跌幅榜（第18个工作流 - 空头版）",
+        f"📉 Bitget 4小时级别 跌幅×杠杆/100 排行（第42个工作流 - 空头版）",
         f"🕘 时间：{current_time}（北京时间）",
-        f"📉 策略逻辑：",
+        f"📉 策略逻辑（空头）：",
         f"   • 扫描所有USDT本位永续合约",
-        f"   • 按上根4小时K棒跌幅从高到低排序",
+        f"   • 排序指标 = 上根4小时K棒跌幅 × (杠杆/100)",
+        f"   • 跌幅为负值，跌幅越大指标值越小，排越前",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -145,10 +166,13 @@ def main():
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   涨跌幅: {item['change']}%\n"
+                f"   杠杆: {item['leverage']}x\n"
+                f"   指标值: {item['score']}\n"
                 f"   开盘: {item['open1']} → 收盘: {item['close1']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
-        msg_lines.append("💡 解读：上根4小时K棒跌幅排名")
+        msg_lines.append(f"📊 共筛选出 {len(result_list)} 个合约")
+        msg_lines.append("💡 解读：指标值 = 跌幅 × (杠杆/100)，负值越大（即绝对值越大）代表下跌贡献越大")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到K线数据")
