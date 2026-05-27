@@ -11,6 +11,7 @@ WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 PUSH_TOP_N = 10
 TIMEFRAME_1H = '1h'
 MA5_PERIOD = 5
+MA20_PERIOD = 20
 KDJ_RSV_PERIOD = 9
 KDJ_SMOOTH = 3
 # =============================================
@@ -97,10 +98,11 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第45个工作流扫描（1小时：收盘>MA5 + 上根震荡 + J值上升 + 双K线震荡）")
+    print(f"🚀 开始第45个工作流扫描（1小时：收盘>MA5 + 收盘>MA20 + 上根震荡 + J值上升 + 双K线震荡）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根收盘价 > MA5")
+    print(f"   • 上根收盘价 > MA20")
     print(f"   • 上根收盘价 ∈ [上上根最低价, 上上根最高价]（震荡）")
     print(f"   • 上根KDJ的J值 > 上上根J值")
     print(f"   • 上上根收盘价 ∈ [上上上根最低价, 上上上根最高价]（震荡）")
@@ -187,7 +189,12 @@ def main():
             if ma5 is None or close1 <= ma5:
                 continue
 
-            # 条件2：上根收盘价在上上根的最高价和最低价之间（震荡）
+            # 条件2：上根收盘价 > MA20
+            ma20 = calculate_ma_for_target_kline(ohlcv, prev1_ts, MA20_PERIOD)
+            if ma20 is None or close1 <= ma20:
+                continue
+
+            # 条件3：上根收盘价在上上根的最高价和最低价之间（震荡）
             if not (low2 < close1 < high2):
                 continue
 
@@ -204,15 +211,15 @@ def main():
             j1 = j_vals[idx1]
             j2 = j_vals[idx2]
 
-            # 条件3：上根J值 > 上上根J值（J值上升）
+            # 条件4：上根J值 > 上上根J值（J值上升）
             if j1 <= j2:
                 continue
 
-            # 条件4：上上根收盘价在上上上根的最高价和最低价之间
+            # 条件5：上上根收盘价在上上上根的最高价和最低价之间
             if not (low3 < close2 < high3):
                 continue
 
-            # 条件5：上上上根收盘价在上上上上根的最高价和最低价之间
+            # 条件6：上上上根收盘价在上上上上根的最高价和最低价之间
             if not (low4 < close3 < high4):
                 continue
 
@@ -229,6 +236,7 @@ def main():
                 'close1': round(close1, 4),
                 'open1': round(open1, 4),
                 'ma5': round(ma5, 4),
+                'ma20': round(ma20, 4),
                 'high2': round(high2, 4),
                 'low2': round(low2, 4),
                 'j1': round(j1, 2),
@@ -257,7 +265,7 @@ def main():
         f"📊 Bitget 1小时级别多条件扫描（第45个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根收盘价 > MA5",
+        f"   • 上根收盘价 > MA5 且 > MA20",
         f"   • 上根收盘 ∈ [上上根区间]（震荡）",
         f"   • 上根J值 > 上上根J值",
         f"   • 上上根收盘 ∈ [上上上根区间]（震荡）",
@@ -271,7 +279,7 @@ def main():
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   上根涨幅: +{item['gain']}%\n"
-                f"   上根收盘 {item['close1']} > MA5({item['ma5']}) ✅\n"
+                f"   上根收盘 {item['close1']} > MA5({item['ma5']}) ✅, > MA20({item['ma20']}) ✅\n"
                 f"   上根震荡: {item['close1']} ∈ [{item['low2']}, {item['high2']}] ✅\n"
                 f"   J值: {item['j2']} → {item['j1']} (上升 ✅)\n"
                 f"   上上根震荡: {item['close2']} ∈ [{item['low3']}, {item['high3']}] ✅\n"
@@ -280,7 +288,7 @@ def main():
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：收盘站上MA5 + 双K线震荡 + J值上升，按加权涨幅排序")
+        msg_lines.append("💡 解读：收盘站上MA5和MA20 + 双K线震荡 + J值上升，按加权涨幅排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
