@@ -67,12 +67,12 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第48个工作流扫描（4小时：双K线震荡 + 按上根振幅×杠杆/100排序）")
+    print(f"🚀 开始第48个工作流扫描（4小时：双K线震荡 + 按振幅和×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根收盘价 ∈ [上上根最低价, 上上根最高价]（震荡）")
     print(f"   • 上上根收盘价 ∈ [上上上根最低价, 上上上根最高价]（震荡）")
-    print(f"   • 排序 = 上根振幅 × (最高杠杆倍数 / 100)（从高到低）")
+    print(f"   • 排序 = |上根振幅 + 上上根振幅| × (最高杠杆倍数 / 100)（从高到低）")
     print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
     print(f"📊 推送：前十名（微信推送）")
 
@@ -151,19 +151,21 @@ def main():
             if not (low3 < close2 < high3):
                 continue
 
-            # 排序指标：上根振幅 × 杠杆/100
-            amplitude = (high1 - low1) / low1 * 100
+            # 计算振幅
+            amplitude1 = (high1 - low1) / low1 * 100   # 上根振幅
+            amplitude2 = (high2 - low2) / low2 * 100   # 上上根振幅
+            total_amplitude = amplitude1 + amplitude2   # 振幅和
             leverage = leverage_info[symbol]
-            score = amplitude * (leverage / 100)
+            score = total_amplitude * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'amplitude': round(amplitude, 2),
+                'amplitude1': round(amplitude1, 2),
+                'amplitude2': round(amplitude2, 2),
+                'total_amplitude': round(total_amplitude, 2),
                 'leverage': round(leverage),
                 'score': round(score, 4),
                 'close1': round(close1, 4),
-                'high1': round(high1, 4),
-                'low1': round(low1, 4),
                 'close2': round(close2, 4),
                 'high2': round(high2, 4),
                 'low2': round(low2, 4),
@@ -189,7 +191,7 @@ def main():
         f"📈 策略逻辑：",
         f"   • 上根收盘 ∈ [上上根区间]（震荡）",
         f"   • 上上根收盘 ∈ [上上上根区间]（震荡）",
-        f"   • 排序 = 上根振幅 × (杠杆/100)",
+        f"   • 排序 = |上根振幅 + 上上根振幅| × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -197,7 +199,8 @@ def main():
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
-                f"   上根振幅: {item['amplitude']}%\n"
+                f"   上根振幅: {item['amplitude1']}%, 上上根振幅: {item['amplitude2']}%\n"
+                f"   振幅和: {item['total_amplitude']}%\n"
                 f"   杠杆: {item['leverage']}x\n"
                 f"   排序值: {item['score']}\n"
                 f"   上根收盘 {item['close1']} ∈ 上上根区间 [{item['low2']}, {item['high2']}] ✅\n"
@@ -205,7 +208,7 @@ def main():
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：连续两根K线在各自前一根K线区间内震荡，按上根加权波动强度排序")
+        msg_lines.append("💡 解读：连续两根K线在各自前一根K线区间内震荡，按双K线加权波动强度之和排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
