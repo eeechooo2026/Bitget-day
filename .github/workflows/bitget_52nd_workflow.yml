@@ -1,0 +1,16 @@
+name: Bitget 第52个工作流 - 1小时级别四重形态扫描（空头版，手动触发）
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 52nd workflow scan
+        run: python scanner_52nd_workflow.py
