@@ -1,0 +1,19 @@
+name: Bitget 第56个工作流 - 日线级别 振幅×杠杆/100 排行
+
+on:
+  schedule:
+    # 北京时间每天 8:01 = UTC 0:01
+    - cron: '1 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 56th workflow scan
+        run: python scanner_56th_workflow.py
