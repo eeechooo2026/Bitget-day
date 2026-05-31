@@ -11,7 +11,7 @@ WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 PUSH_TOP_N = 10
 TIMEFRAME_4H = '4h'
 MA20_PERIOD = 20
-LOOKBACK_BARS = 6  # 前6根K线
+LOOKBACK_BARS = 6
 # =============================================
 
 def send_push_wxpusher(message):
@@ -86,7 +86,6 @@ def main():
     print(f"   • 上根K棒收盘价 > MA20")
     print(f"   • 上根K棒收盘价 > 前{LOOKBACK_BARS}根K棒每一根的最高价（突破前高）")
     print(f"   • 排序 = 上根涨幅 × (杠杆/100)")
-    print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
 
@@ -125,7 +124,6 @@ def main():
 
     for idx, symbol in enumerate(swap_symbols):
         try:
-            # 获取足够多的4小时K线（至少需要 MA20_PERIOD + LOOKBACK_BARS 根）
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=50)
             if len(ohlcv) < 30:
                 continue
@@ -197,8 +195,8 @@ def main():
         f"📊 Bitget 4小时级别突破扫描（第59个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根收盘价 > MA20({item['ma20']})",
-        f"   • 上根收盘价 > 前{LOOKBACK_BARS}根最高价({item['max_high']})",
+        f"   • 上根收盘价 > MA20",
+        f"   • 上根收盘价 > 前{LOOKBACK_BARS}根最高价",
         f"   • 排序 = 上根涨幅 × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -210,7 +208,8 @@ def main():
                 f"   上根涨幅: +{item['gain']}%\n"
                 f"   上根收盘: {item['close1']} > MA20({item['ma20']}) ✅\n"
                 f"   突破前{LOOKBACK_BARS}根最高: {item['max_high']} → {item['close1']} ✅\n"
-                f"   杠杆: {item['leverage']}x, 排序值: {item['score']}"
+                f"   杠杆: {item['leverage']}x\n"
+                f"   排序值: {item['score']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
