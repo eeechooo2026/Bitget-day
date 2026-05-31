@@ -90,9 +90,10 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第61个工作流扫描（1小时：收阴 + 收盘>MA5 + 按4小时涨幅×杠杆/100排序）")
+    print(f"🚀 开始第61个工作流扫描（1小时：上根收阴 + 收盘>MA5 + 上上根收阳 + 按4小时涨幅×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
+    print(f"   • 上上根1小时K棒收阳（收盘价 > 开盘价）")
     print(f"   • 上根1小时K棒收阴（收盘价 < 开盘价）")
     print(f"   • 上根1小时K棒收盘价 > MA5")
     print(f"   • 排序 = 4小时上根涨幅 × (最高杠杆倍数 / 100)")
@@ -126,12 +127,14 @@ def main():
         return
 
     # 1小时级别目标K线时间戳
-    prev1_ts_1h = get_1h_period_start_timestamp(beijing_now, -1)   # 上根1小时
+    prev1_ts_1h = get_1h_period_start_timestamp(beijing_now, -1)   # 上根
+    prev2_ts_1h = get_1h_period_start_timestamp(beijing_now, -2)   # 上上根
 
     # 4小时级别目标K线时间戳（用于排序）
     prev1_ts_4h = get_4h_period_start_timestamp(beijing_now, -1)   # 上根4小时
 
     print("📅 目标K线时间段（北京时间）:")
+    print(f"   上上根（1小时）: {ts_to_beijing(prev2_ts_1h).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev2_ts_1h)+timedelta(hours=1)).strftime('%H:%M')}")
     print(f"   上根（1小时）: {ts_to_beijing(prev1_ts_1h).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts_1h)+timedelta(hours=1)).strftime('%H:%M')}")
     print(f"   排序用4小时上根: {ts_to_beijing(prev1_ts_4h).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts_4h)+timedelta(hours=4)).strftime('%H:%M')}")
 
@@ -151,20 +154,27 @@ def main():
                 continue
 
             # 查找1小时K线
-            k1 = find_kline_by_timestamp(ohlcv_1h, prev1_ts_1h)
-            if k1 is None:
+            k1 = find_kline_by_timestamp(ohlcv_1h, prev1_ts_1h)   # 上根
+            k2 = find_kline_by_timestamp(ohlcv_1h, prev2_ts_1h)   # 上上根
+            if k1 is None or k2 is None:
                 continue
 
             close1 = k1[4]
             open1 = k1[1]
-            if open1 == 0:
+            close2 = k2[4]
+            open2 = k2[1]
+            if open1 == 0 or open2 == 0:
                 continue
 
-            # 条件1：上根收阴
+            # 条件1：上上根收阳
+            if close2 <= open2:
+                continue
+
+            # 条件2：上根收阴
             if close1 >= open1:
                 continue
 
-            # 条件2：上根收盘价 > MA5
+            # 条件3：上根收盘价 > MA5
             ma5 = calculate_ma_for_target_kline(ohlcv_1h, prev1_ts_1h, MA5_PERIOD)
             if ma5 is None or close1 <= ma5:
                 continue
@@ -188,6 +198,8 @@ def main():
                 'score': round(score, 4),
                 'close1': round(close1, 4),
                 'open1': round(open1, 4),
+                'close2': round(close2, 4),
+                'open2': round(open2, 4),
                 'ma5': round(ma5, 4),
             })
 
@@ -204,11 +216,12 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 1小时级别收阴+收盘>MA5扫描（第61个工作流）",
+        f"📊 Bitget 1小时级别阴阳形态+收盘>MA5扫描（第61个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根1小时K棒收阴",
-        f"   • 上根1小时K棒收盘价 > MA5",
+        f"   • 上上根收阳 ✅",
+        f"   • 上根收阴 ✅",
+        f"   • 上根收盘价 > MA5 ✅",
         f"   • 排序 = 4小时上根涨幅 × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -218,14 +231,14 @@ def main():
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   4小时涨幅: +{item['gain_4h']}%\n"
+                f"   上上根: {item['open2']} → {item['close2']} (收阳 ✅)\n"
                 f"   上根: {item['open1']} → {item['close1']} (收阴 ✅)\n"
                 f"   上根收盘 {item['close1']} > MA5({item['ma5']}) ✅\n"
-                f"   杠杆: {item['leverage']}x\n"
-                f"   排序值: {item['score']}"
+                f"   杠杆: {item['leverage']}x, 排序值: {item['score']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：1小时收阴但站上MA5，按4小时加权涨幅排序")
+        msg_lines.append("💡 解读：上上根收阳 + 上根收阴但站上MA5，按4小时加权涨幅排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
