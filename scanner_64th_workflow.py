@@ -65,12 +65,12 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第64个工作流扫描（月线级别：连续三根收阳 + 按涨幅从低到高排序）")
+    print(f"🚀 开始第64个工作流扫描（月线级别：阳-阴-阳形态 + 按涨幅从低到高排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上根月线收阳")
-    print(f"   • 上上根月线收阳")
-    print(f"   • 上上上根月线收阳")
+    print(f"   • 上上上根月线收阳 ✅")
+    print(f"   • 上上根月线收阴 ✅")
+    print(f"   • 上根月线收阳 ✅")
     print(f"   • 排序 = 上根月线涨幅（从低到高）")
     print(f"📊 推送：前十名（微信推送）")
 
@@ -139,14 +139,14 @@ def main():
             if open1 == 0 or open2 == 0 or open3 == 0:
                 continue
 
-            # 条件1：上根收阳
-            if close1 <= open1:
-                continue
-            # 条件2：上上根收阳
-            if close2 <= open2:
-                continue
-            # 条件3：上上上根收阳
+            # 条件1：上上上根收阳
             if close3 <= open3:
+                continue
+            # 条件2：上上根收阴
+            if close2 >= open2:
+                continue
+            # 条件3：上根收阳
+            if close1 <= open1:
                 continue
 
             # 计算上根涨幅
@@ -159,6 +159,10 @@ def main():
                 'leverage': round(leverage),
                 'open1': round(open1, 4),
                 'close1': round(close1, 4),
+                'open2': round(open2, 4),
+                'close2': round(close2, 4),
+                'open3': round(open3, 4),
+                'close3': round(close3, 4),
             })
 
             if (idx+1) % 50 == 0:
@@ -174,11 +178,11 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 月线级别连续三根收阳扫描（第64个工作流）",
+        f"📊 Bitget 月线级别阳-阴-阳形态扫描（第64个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 上上上根月线收阳 ✅",
-        f"   • 上上根月线收阳 ✅",
+        f"   • 上上根月线收阴 ✅",
         f"   • 上根月线收阳 ✅",
         f"   • 排序 = 上根月线涨幅（从低到高）",
         f"━━━━━━━━━━━━━━━━━━━━"
@@ -189,12 +193,12 @@ def main():
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   上根月线涨幅: +{item['gain']}%\n"
-                f"   开盘: {item['open1']} → 收盘: {item['close1']}\n"
+                f"   形态: {item['open3']}→{item['close3']} (阳) | {item['open2']}→{item['close2']} (阴) | {item['open1']}→{item['close1']} (阳)\n"
                 f"   杠杆: {item['leverage']}x"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：连续三根月线收阳，按最新月线涨幅从小到大排序")
+        msg_lines.append("💡 解读：月线形成阳-阴-阳形态，按最新月线涨幅从小到大排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
