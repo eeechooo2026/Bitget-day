@@ -53,10 +53,10 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第66个工作流扫描（日线级别：阳(震荡)-阴(震荡)-阳形态 + 按涨幅从低到高排序）")
+    print(f"🚀 开始第66个工作流扫描（日线级别：阳-阴(震荡)-阳形态 + 按涨幅从低到高排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上上上根日线收阳 + 收盘价 ∈ [上上上上根区间]（震荡）✅")
+    print(f"   • 上上上根日线收阳 ✅")
     print(f"   • 上上根日线收阴 + 收盘价 ∈ [上上上根区间]（震荡）✅")
     print(f"   • 上根日线收阳 ✅")
     print(f"   • 排序 = 上根日线涨幅（从低到高）")
@@ -93,32 +93,28 @@ def main():
     prev1_ts = get_daily_period_start_timestamp(beijing_now, -1)   # 上根
     prev2_ts = get_daily_period_start_timestamp(beijing_now, -2)   # 上上根
     prev3_ts = get_daily_period_start_timestamp(beijing_now, -3)   # 上上上根
-    prev4_ts = get_daily_period_start_timestamp(beijing_now, -4)   # 上上上上根
 
     target_date1 = ts_to_beijing(prev1_ts).strftime('%Y-%m-%d')
     target_date2 = ts_to_beijing(prev2_ts).strftime('%Y-%m-%d')
     target_date3 = ts_to_beijing(prev3_ts).strftime('%Y-%m-%d')
-    target_date4 = ts_to_beijing(prev4_ts).strftime('%Y-%m-%d')
     print(f"📅 目标K线时间段:")
     print(f"   上根: {target_date1}")
     print(f"   上上根: {target_date2}")
     print(f"   上上上根: {target_date3}")
-    print(f"   上上上上根: {target_date4}")
 
     print("⏳ 正在获取日线K线数据...")
     result_list = []
 
     for idx, symbol in enumerate(swap_symbols):
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=15)
-            if len(ohlcv) < 5:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1D, limit=10)
+            if len(ohlcv) < 4:
                 continue
 
             k1 = find_kline_by_timestamp(ohlcv, prev1_ts)   # 上根
             k2 = find_kline_by_timestamp(ohlcv, prev2_ts)   # 上上根
             k3 = find_kline_by_timestamp(ohlcv, prev3_ts)   # 上上上根
-            k4 = find_kline_by_timestamp(ohlcv, prev4_ts)   # 上上上上根
-            if None in (k1, k2, k3, k4):
+            if k1 is None or k2 is None or k3 is None:
                 continue
 
             open1 = k1[1]
@@ -127,20 +123,16 @@ def main():
             close2 = k2[4]
             open3 = k3[1]
             close3 = k3[4]
-            high4 = k4[2]
-            low4 = k4[3]
             high3 = k3[2]
             low3 = k3[3]
 
-            if any(v == 0 for v in [open1, open2, open3]):
+            if open1 == 0 or open2 == 0 or open3 == 0:
                 continue
-            if low3 == 0 or low4 == 0:
+            if low3 == 0:
                 continue
 
-            # 条件1：上上上根收阳 + 收盘价在上上上上根的最高价和最低价之间（震荡）
+            # 条件1：上上上根收阳
             if close3 <= open3:
-                continue
-            if not (low4 < close3 < high4):
                 continue
 
             # 条件2：上上根收阴 + 收盘价在上上上根的最高价和最低价之间（震荡）
@@ -169,8 +161,6 @@ def main():
                 'close3': round(close3, 4),
                 'high3': round(high3, 4),
                 'low3': round(low3, 4),
-                'high4': round(high4, 4),
-                'low4': round(low4, 4),
             })
 
             if (idx+1) % 50 == 0:
@@ -186,12 +176,12 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 日线级别双重震荡形态扫描（第66个工作流）",
+        f"📊 Bitget 日线级别阳-阴(震荡)-阳形态扫描（第66个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上上上根收阳 + 收盘 ∈ [上上上上根区间] ✅",
-        f"   • 上上根收阴 + 收盘 ∈ [上上上根区间] ✅",
-        f"   • 上根收阳 ✅",
+        f"   • 上上上根日线收阳 ✅",
+        f"   • 上上根日线收阴 + 收盘 ∈ [上上上根区间] ✅",
+        f"   • 上根日线收阳 ✅",
         f"   • 排序 = 上根日线涨幅（从低到高）",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -201,14 +191,14 @@ def main():
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   上根日线涨幅: +{item['gain']}%\n"
-                f"   上上上根: {item['open3']}→{item['close3']} (阳) ∈ [{item['low4']}, {item['high4']}]\n"
-                f"   上上根: {item['open2']}→{item['close2']} (阴) ∈ [{item['low3']}, {item['high3']}]\n"
-                f"   上根: {item['open1']}→{item['close1']} (阳)\n"
+                f"   形态: {item['open3']}→{item['close3']} (阳) | "
+                f"{item['open2']}→{item['close2']} (阴) ∈ [{item['low3']}, {item['high3']}] | "
+                f"{item['open1']}→{item['close1']} (阳)\n"
                 f"   杠杆: {item['leverage']}x"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：上上上根阳线震荡 + 上上根阴线震荡 + 上根阳线，按最新涨幅从小到大排序")
+        msg_lines.append("💡 解读：日线形成阳-阴(震荡)-阳形态，按最新日线涨幅从小到大排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
