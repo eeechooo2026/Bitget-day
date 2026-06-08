@@ -11,6 +11,8 @@ WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 PUSH_TOP_N = 10
 TIMEFRAME_4H = '4h'
 MA5_PERIOD = 5
+MA10_PERIOD = 10
+MA20_PERIOD = 20
 KDJ_RSV_PERIOD = 9
 KDJ_SMOOTH = 3
 # =============================================
@@ -106,13 +108,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第70个工作流扫描（4小时：收阳+收盘>MA5 + J值上升 + J值前低 + 按涨幅从低到高排序）")
+    print(f"🚀 开始第70个工作流扫描（4小时：收阳+收盘>MA5/MA10/MA20 + J值金叉 + J值前低 + 按涨幅从高到低排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上根收阳 + 收盘价 > MA5")
-    print(f"   • 上根J值 > 上上根J值（J值上升）")
+    print(f"   • 上根收阳 + 收盘价 > MA5 且 > MA10 且 > MA20")
+    print(f"   • 上根J值 > 上上根J值（J值上升/金叉）")
     print(f"   • 上上根J值 < 上上上根J值（J值前低）")
-    print(f"   • 排序 = 上根涨幅（从低到高）")
+    print(f"   • 排序 = 上根涨幅（从高到低）")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -176,9 +178,13 @@ def main():
             if close1 <= open1:
                 continue
 
-            # 条件1续：上根收盘价 > MA5
+            # 条件1续：上根收盘价 > MA5, > MA10, > MA20
             ma5 = calculate_ma_for_target_kline(ohlcv, prev1_ts, MA5_PERIOD)
-            if ma5 is None or close1 <= ma5:
+            ma10 = calculate_ma_for_target_kline(ohlcv, prev1_ts, MA10_PERIOD)
+            ma20 = calculate_ma_for_target_kline(ohlcv, prev1_ts, MA20_PERIOD)
+            if None in (ma5, ma10, ma20):
+                continue
+            if not (close1 > ma5 and close1 > ma10 and close1 > ma20):
                 continue
 
             # 计算KDJ
@@ -197,7 +203,7 @@ def main():
             if None in (j1, j2, j3):
                 continue
 
-            # 条件2：上根J值 > 上上根J值（J值上升）
+            # 条件2：上根J值 > 上上根J值（J值上升/金叉）
             if j1 <= j2:
                 continue
 
@@ -216,6 +222,8 @@ def main():
                 'close1': round(close1, 4),
                 'open1': round(open1, 4),
                 'ma5': round(ma5, 4),
+                'ma10': round(ma10, 4),
+                'ma20': round(ma20, 4),
                 'j3': round(j3, 2),
                 'j2': round(j2, 2),
                 'j1': round(j1, 2),
@@ -228,8 +236,8 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按涨幅从低到高排序（涨幅最小的排最前）
-    result_list.sort(key=lambda x: x['gain'])
+    # 按涨幅从高到低排序（涨幅最大的排最前）
+    result_list.sort(key=lambda x: x['gain'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
@@ -237,10 +245,10 @@ def main():
         f"📊 Bitget 4小时级别多条件扫描（第70个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根收阳 + 收盘价 > MA5 ✅",
-        f"   • 上根J值 > 上上根J值 ✅",
-        f"   • 上上根J值 < 上上上根J值 ✅",
-        f"   • 排序 = 上根涨幅（从低到高）",
+        f"   • 上根收阳 + 收盘价 > MA5/MA10/MA20 ✅",
+        f"   • 上根J值 > 上上根J值（金叉）✅",
+        f"   • 上上根J值 < 上上上根J值（前低）✅",
+        f"   • 排序 = 上根涨幅（从高到低）",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -249,14 +257,14 @@ def main():
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   上根涨幅: +{item['gain']}%\n"
-                f"   上根收盘 {item['close1']} > MA5({item['ma5']}) ✅\n"
+                f"   上根收盘 {item['close1']} > MA5({item['ma5']}) > MA10({item['ma10']}) > MA20({item['ma20']}) ✅\n"
                 f"   J值变化: {item['j3']} → {item['j2']} → {item['j1']}\n"
                 f"   (J2<J3 ✅, J1>J2 ✅)\n"
                 f"   杠杆: {item['leverage']}x"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：收阳+站上MA5+J值金叉+前低，按涨幅从小到大排序")
+        msg_lines.append("💡 解读：收阳+站上三均线+J值金叉+前低，按涨幅从大到小排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
