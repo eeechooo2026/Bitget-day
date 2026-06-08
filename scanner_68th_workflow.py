@@ -36,19 +36,25 @@ def send_push_wxpusher(message):
 def get_utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
-def get_weekly_period_start_timestamp(beijing_dt, offset_weeks=0):
-    """获取指定偏移量的周线K线的开始时间戳（毫秒，UTC）"""
-    # 获取当前日期所在周的第一天（周一）
-    days_since_monday = beijing_dt.weekday()
-    monday = beijing_dt - timedelta(days=days_since_monday)
-    week_start = monday.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start += timedelta(weeks=offset_weeks)
-    utc_start = week_start - timedelta(hours=8)
-    return int(utc_start.timestamp() * 1000)
+def get_weekly_target_dates(beijing_now, offset_weeks=0):
+    """
+    返回目标周线对应的日期字符串（UTC 时间的周一日期）
+    用于匹配 fetch_ohlcv 返回的 K 线
+    """
+    # 计算北京时间所在周的周一日期
+    days_since_monday = beijing_now.weekday()
+    monday_beijing = beijing_now - timedelta(days=days_since_monday)
+    target_monday = monday_beijing + timedelta(weeks=offset_weeks)
+    # 转换为 UTC 日期（减去8小时，如果跨日则日期会变）
+    utc_date = (target_monday - timedelta(hours=8)).date()
+    return utc_date.strftime('%Y-%m-%d')
 
-def find_kline_by_timestamp(ohlcv, target_ts):
+def find_kline_by_date(ohlcv, target_date_str):
+    """在K线列表中查找指定日期（UTC日期）的K线"""
     for k in ohlcv:
-        if k[0] == target_ts:
+        # 将时间戳转换为 UTC 日期字符串
+        k_date = datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc).date().strftime('%Y-%m-%d')
+        if k_date == target_date_str:
             return k
     return None
 
@@ -58,7 +64,7 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第68个工作流扫描（周线级别：上根+上上根涨幅和排序）")
+    print(f"🚀 开始第68个工作流扫描（周线级别：上根+上上根涨幅和排序 - 修复版）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 扫描所有USDT本位永续合约")
@@ -71,7 +77,7 @@ def main():
     markets = exchange.load_markets()
     print(f"📊 共加载 {len(markets)} 个交易对")
 
-    # 筛选 USDT 本位永续合约，并提取杠杆信息（用于显示）
+    # 筛选 USDT 本位永续合约，并提取杠杆信息
     swap_symbols = []
     leverage_info = {}
     for symbol, market in markets.items():
@@ -92,28 +98,29 @@ def main():
         print("❌ 未找到合约交易对")
         return
 
-    # 目标K线时间戳
-    prev1_ts = get_weekly_period_start_timestamp(beijing_now, -1)   # 上根周线
-    prev2_ts = get_weekly_period_start_timestamp(beijing_now, -2)   # 上上根周线
-
-    target_week1 = ts_to_beijing(prev1_ts).strftime('%Y-%m-%d')
-    target_week2 = ts_to_beijing(prev2_ts).strftime('%Y-%m-%d')
-    print(f"📅 目标K线时间段:")
-    print(f"   上根周线: {target_week1}")
-    print(f"   上上根周线: {target_week2}")
+    # 计算目标周线的日期字符串
+    target_date_prev1 = get_weekly_target_dates(beijing_now, -1)   # 上根周线
+    target_date_prev2 = get_weekly_target_dates(beijing_now, -2)   # 上上根周线
+    print(f"📅 目标周线日期（UTC）:")
+    print(f"   上根周线: {target_date_prev1}")
+    print(f"   上上根周线: {target_date_prev2}")
 
     print("⏳ 正在获取周线K线数据...")
     result_list = []
 
     for idx, symbol in enumerate(swap_symbols):
         try:
+            # 获取最近10根周线K线
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1W, limit=10)
             if len(ohlcv) < 3:
                 continue
 
-            k1 = find_kline_by_timestamp(ohlcv, prev1_ts)   # 上根周线
-            k2 = find_kline_by_timestamp(ohlcv, prev2_ts)   # 上上根周线
+            # 用日期查找K线（不再用时间戳精确匹配）
+            k1 = find_kline_by_date(ohlcv, target_date_prev1)   # 上根周线
+            k2 = find_kline_by_date(ohlcv, target_date_prev2)   # 上上根周线
             if k1 is None or k2 is None:
+                # 调试输出（可选，首次运行时可取消注释查看）
+                # print(f"   {symbol}: 未找到目标周线 (上根={target_date_prev1}, 上上根={target_date_prev2})")
                 continue
 
             open1 = k1[1]
@@ -137,10 +144,6 @@ def main():
                 'gain2': round(gain2, 2),
                 'total_gain': round(total_gain, 2),
                 'leverage': round(leverage),
-                'open1': round(open1, 4),
-                'close1': round(close1, 4),
-                'open2': round(open2, 4),
-                'close2': round(close2, 4),
             })
 
             if (idx+1) % 50 == 0:
@@ -156,7 +159,7 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 周线级别涨幅和排行（第68个工作流）",
+        f"📊 Bitget 周线级别涨幅和排行（第68个工作流 - 修复版）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 扫描所有USDT本位永续合约",
@@ -178,7 +181,7 @@ def main():
         msg_lines.append("💡 解读：连续两周累计涨幅排名")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
-        msg_lines.append("😔 未找到K线数据")
+        msg_lines.append("😔 未找到符合条件的币种")
 
     message = "\n".join(msg_lines)
     print("\n" + "="*50)
