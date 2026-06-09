@@ -8,7 +8,7 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-PUSH_TOP_N = 20  # 改为推送前20名
+PUSH_TOP_N = 30  # 改为推送前30名
 TIMEFRAME_1D = '1d'
 # =============================================
 
