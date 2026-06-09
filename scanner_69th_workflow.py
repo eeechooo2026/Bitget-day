@@ -8,7 +8,7 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-PUSH_TOP_N = 10
+PUSH_TOP_N = 20  # 改为推送前20名
 TIMEFRAME_1D = '1d'
 # =============================================
 
@@ -60,7 +60,7 @@ def main():
     print(f"   • 上根日线K棒收阳（收盘价 > 开盘价）")
     print(f"   • 排序 = 上根日线K棒振幅（从高到低）")
     print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
-    print(f"📊 推送：前十名（微信推送）")
+    print(f"📊 推送：前{PUSH_TOP_N}名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
 
@@ -155,7 +155,7 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 振幅榜前十名（共{len(result_list)}个合约）：")
+        msg_lines.append(f"📋 振幅榜前{PUSH_TOP_N}名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
