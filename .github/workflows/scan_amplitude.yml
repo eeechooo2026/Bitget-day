@@ -1,0 +1,32 @@
+name: 扫描振幅超100%的阳线币种
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖
+        run: pip install ccxt pandas
+
+      - name: 运行扫描脚本
+        run: python scan_amplitude.py
+        env:
+          WX_PUSHER_APP_TOKEN: ${{ secrets.WX_PUSHER_APP_TOKEN }}
+          WX_PUSHER_UID: ${{ secrets.WX_PUSHER_UID }}
+
+      - name: 上传结果日志（可选）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-result
+          path: result.txt
