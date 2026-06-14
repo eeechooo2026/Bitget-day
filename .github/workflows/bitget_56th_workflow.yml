@@ -1,4 +1,4 @@
-name: Bitget 第56个工作流 - 日线级别 振幅×杠杆/100 排行
+name: Bitget 第56个工作流 - 日线级别 |振幅|×杠杆/100 排行
 
 on:
   schedule:
