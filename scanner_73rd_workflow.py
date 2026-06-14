@@ -8,7 +8,7 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-PUSH_TOP_N = 10
+PUSH_TOP_N = 13  # 改为推送前13名
 TIMEFRAME_1D = '1d'
 # =============================================
 
@@ -64,7 +64,7 @@ def main():
     print(f"   • 上上根不震荡：收盘价 ∉ [上上上根区间]")
     print(f"   • 排序 = 上根振幅 × (最高杠杆倍数 / 100)（从高到低）")
     print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
-    print(f"📊 推送：前十名（微信推送）")
+    print(f"📊 推送：前{PUSH_TOP_N}名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
 
@@ -72,7 +72,6 @@ def main():
     markets = exchange.load_markets()
     print(f"📊 共加载 {len(markets)} 个交易对")
 
-    # 筛选 USDT 本位永续合约，并提取杠杆信息（用于显示）
     swap_symbols = []
     leverage_info = {}
     for symbol, market in markets.items():
@@ -93,7 +92,6 @@ def main():
         print("❌ 未找到合约交易对")
         return
 
-    # 目标K线时间戳
     prev1_ts = get_daily_period_start_timestamp(beijing_now, -1)   # 上根
     prev2_ts = get_daily_period_start_timestamp(beijing_now, -2)   # 上上根
     prev3_ts = get_daily_period_start_timestamp(beijing_now, -3)   # 上上上根
@@ -133,15 +131,11 @@ def main():
             if low1 == 0 or low2 == 0 or low3 == 0:
                 continue
 
-            # 条件1：上根震荡（收盘价在上上根区间内）
             if not is_consolidation(close1, high2, low2):
                 continue
-
-            # 条件2：上上根不震荡（收盘价不在上上上根区间内）
             if is_consolidation(close2, high3, low3):
                 continue
 
-            # 计算上根振幅
             amplitude = (high1 - low1) / low1 * 100
             leverage = leverage_info[symbol]
             score = amplitude * (leverage / 100)
@@ -166,7 +160,6 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按 score 从高到低排序
     result_list.sort(key=lambda x: x['score'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
@@ -181,7 +174,7 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 筛选结果前十名（共{len(result_list)}个合约）：")
+        msg_lines.append(f"📋 筛选结果前{PUSH_TOP_N}名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
