@@ -8,7 +8,7 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-PUSH_TOP_N = 10
+PUSH_TOP_N = 13  # 改为推送前13名
 TIMEFRAME_1D = '1d'
 # =============================================
 
@@ -58,7 +58,7 @@ def main():
     print(f"📈 策略逻辑：")
     print(f"   • 扫描所有USDT本位永续合约")
     print(f"   • 排序指标 = 上根日线K棒涨幅 × (最高杠杆倍数 / 100)")
-    print(f"📊 推送：前十名（微信推送）")
+    print(f"📊 推送：前{PUSH_TOP_N}名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
 
@@ -145,7 +145,7 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 排行榜前十名（共{len(result_list)}个合约）：")
+        msg_lines.append(f"📋 排行榜前{PUSH_TOP_N}名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
