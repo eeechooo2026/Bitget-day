@@ -8,7 +8,7 @@ import json
 WX_PUSHER_APP_TOKEN = "AT_6EcetNOaafHBZXtsqLSob1KGlfHQTMss"
 WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
-PUSH_TOP_N = 10
+PUSH_TOP_N = 13
 TIMEFRAME_4H = '4h'
 # =============================================
 
@@ -67,14 +67,14 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第49个工作流扫描（4小时：多重形态组合 + 双K线震荡 + 按振幅和×杠杆/100排序）")
+    print(f"🚀 开始第49个工作流扫描（4小时级别：双震荡 + 上上上根突破 + 按上上上根涨幅×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上根收阳 + 收盘 ∈ [上上根区间]（震荡）")
-    print(f"   • 上上根收阴 + 收盘 ∈ [上上上根区间]（震荡）")
-    print(f"   • 上上上根收阳 + 收盘 > 上上上上根最高价（突破前高）")
-    print(f"   • 排序 = |上根振幅 + 上上根振幅| × (杠杆/100)")
-    print(f"📊 推送：前十名（微信推送）")
+    print(f"   • 上根收阳 + 收盘 ∈ [上上根区间]（震荡）✅")
+    print(f"   • 上上根收盘 ∈ [上上上根区间]（震荡）✅")
+    print(f"   • 上上上根收阳 + 收盘 > 上上上上根最高价（突破前高）✅")
+    print(f"   • 排序 = 上上上根涨幅 × (最高杠杆倍数 / 100)（从高到低）")
+    print(f"📊 推送：前{PUSH_TOP_N}名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
 
@@ -128,17 +128,14 @@ def main():
             k2 = find_kline_by_timestamp(ohlcv, prev2_ts)   # 上上根
             k3 = find_kline_by_timestamp(ohlcv, prev3_ts)   # 上上上根
             k4 = find_kline_by_timestamp(ohlcv, prev4_ts)   # 上上上上根
-            if not (k1 and k2 and k3 and k4):
+            if None in (k1, k2, k3, k4):
                 continue
 
             # 上根数据
             close1 = k1[4]
             open1 = k1[1]
-            high1 = k1[2]
-            low1 = k1[3]
             # 上上根数据
             close2 = k2[4]
-            open2 = k2[1]
             high2 = k2[2]
             low2 = k2[3]
             # 上上上根数据
@@ -149,9 +146,7 @@ def main():
             # 上上上上根数据
             high4 = k4[2]
 
-            if low1 == 0 or low2 == 0 or low3 == 0 or high4 == 0:
-                continue
-            if open1 == 0 or open2 == 0 or open3 == 0:
+            if any(v == 0 for v in [open1, open3, low2, low3, high4]):
                 continue
 
             # 条件1：上根收阳 + 收盘价在上上根区间内
@@ -160,9 +155,7 @@ def main():
             if not (low2 < close1 < high2):
                 continue
 
-            # 条件2：上上根收阴 + 收盘价在上上上根区间内
-            if close2 >= open2:
-                continue
+            # 条件2：上上根收盘价在上上上根区间内（震荡）
             if not (low3 < close2 < high3):
                 continue
 
@@ -172,30 +165,25 @@ def main():
             if close3 <= high4:
                 continue
 
-            # 计算振幅和排序值
-            amplitude1 = (high1 - low1) / low1 * 100   # 上根振幅
-            amplitude2 = (high2 - low2) / low2 * 100   # 上上根振幅
-            total_amplitude = amplitude1 + amplitude2
+            # 排序指标：上上上根涨幅 × 杠杆/100
+            gain3 = (close3 - open3) / open3 * 100
             leverage = leverage_info[symbol]
-            score = total_amplitude * (leverage / 100)
+            score = gain3 * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'amplitude1': round(amplitude1, 2),
-                'amplitude2': round(amplitude2, 2),
-                'total_amplitude': round(total_amplitude, 2),
+                'gain3': round(gain3, 2),
                 'leverage': round(leverage),
                 'score': round(score, 4),
                 'close1': round(close1, 4),
                 'open1': round(open1, 4),
+                'close2': round(close2, 4),
                 'high2': round(high2, 4),
                 'low2': round(low2, 4),
-                'close2': round(close2, 4),
-                'open2': round(open2, 4),
-                'high3': round(high3, 4),
-                'low3': round(low3, 4),
                 'close3': round(close3, 4),
                 'open3': round(open3, 4),
+                'high3': round(high3, 4),
+                'low3': round(low3, 4),
                 'high4': round(high4, 4),
             })
 
@@ -215,28 +203,28 @@ def main():
         f"📊 Bitget 4小时级别多重形态扫描（第49个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根收阳 + 收盘 ∈ [上上根区间]",
-        f"   • 上上根收阴 + 收盘 ∈ [上上上根区间]",
-        f"   • 上上上根收阳 + 收盘 > 上上上上根最高价",
-        f"   • 排序 = |上根振幅 + 上上根振幅| × (杠杆/100)",
+        f"   • 上根收阳 + 收盘 ∈ [上上根区间] ✅",
+        f"   • 上上根收盘 ∈ [上上上根区间] ✅",
+        f"   • 上上上根收阳 + 收盘 > 上上上上根最高价 ✅",
+        f"   • 排序 = 上上上根涨幅 × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 筛选结果前十名（共{len(result_list)}个合约）：")
+        msg_lines.append(f"📋 筛选结果前{PUSH_TOP_N}名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
+                f"   上上上根涨幅: +{item['gain3']}%\n"
+                f"   杠杆: {item['leverage']}x\n"
+                f"   排序值: {item['score']}\n"
                 f"   上上上上根最高: {item['high4']}\n"
                 f"   上上上根: {item['open3']} → {item['close3']} (收阳 ✅) 突破前高 ✅\n"
-                f"   上上根: {item['open2']} → {item['close2']} (收阴 ✅) 收盘 ∈ [{item['low3']}, {item['high3']}] ✅\n"
-                f"   上根: {item['open1']} → {item['close1']} (收阳 ✅) 收盘 ∈ [{item['low2']}, {item['high2']}] ✅\n"
-                f"   上根振幅: {item['amplitude1']}%, 上上根振幅: {item['amplitude2']}%\n"
-                f"   振幅和: {item['total_amplitude']}%, 杠杆: {item['leverage']}x\n"
-                f"   排序值: {item['score']}"
+                f"   上上根: {item['close2']} ∈ [{item['low3']}, {item['high3']}] ✅\n"
+                f"   上根: {item['open1']} → {item['close1']} (收阳 ✅) 收盘 ∈ [{item['low2']}, {item['high2']}] ✅"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：多重形态组合（突破+双震荡），按双K线加权波动强度排序")
+        msg_lines.append("💡 解读：双震荡 + 突破前高，按上上上根加权涨幅排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
