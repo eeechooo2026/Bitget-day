@@ -89,14 +89,14 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第79个工作流扫描（1小时级别：收阳创新低 + J值金叉 + 上上根非金叉 + 按上上根振幅×杠杆/100排序）")
+    print(f"🚀 开始第79个工作流扫描（1小时级别：收阳创新低 + J值金叉 + 上上根非金叉 + 按上上根涨幅×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根收阳 + 最低价 < 上上根最低价 ✅")
     print(f"   • 上根KDJ：J > K 且 J > D（金叉）✅")
     print(f"   • 上上根KDJ：J < K 或 J < D（非金叉）✅")
-    print(f"   • 排序 = 上上根振幅 × (最高杠杆倍数 / 100)（从高到低）")
-    print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
+    print(f"   • 排序 = 上上根涨幅 × (最高杠杆倍数 / 100)（从高到低）")
+    print(f"   • 涨幅 = (收盘价 - 开盘价) / 开盘价 × 100%")
     print(f"📊 推送：前{PUSH_TOP_N}名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -156,10 +156,10 @@ def main():
             low1 = k1[3]
             # 上上根数据
             low2 = k2[3]
-            high2 = k2[2]
-            low2_val = k2[3]
+            open2 = k2[1]
+            close2 = k2[4]
 
-            if open1 == 0 or low2 == 0 or low2_val == 0:
+            if open1 == 0 or open2 == 0:
                 continue
 
             # 条件1：上根收阳 + 最低价 < 上上根最低价
@@ -194,21 +194,22 @@ def main():
             if is_kdj_golden_cross(k2_val, d2_val, j2_val):
                 continue
 
-            # 排序指标：上上根振幅 × 杠杆/100
-            amplitude = (high2 - low2_val) / low2_val * 100
+            # 排序指标：上上根涨幅 × 杠杆/100
+            gain = (close2 - open2) / open2 * 100
             leverage = leverage_info[symbol]
-            score = amplitude * (leverage / 100)
+            score = gain * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'amplitude': round(amplitude, 2),
+                'gain': round(gain, 2),
                 'leverage': round(leverage),
                 'score': round(score, 4),
                 'close1': round(close1, 4),
                 'open1': round(open1, 4),
                 'low1': round(low1, 4),
                 'low2': round(low2, 4),
-                'high2': round(high2, 4),
+                'open2': round(open2, 4),
+                'close2': round(close2, 4),
                 'k1': round(k1_val, 2),
                 'd1': round(d1_val, 2),
                 'j1': round(j1_val, 2),
@@ -236,7 +237,7 @@ def main():
         f"   • 上根收阳 + 最低价 < 上上根最低价 ✅",
         f"   • 上根KDJ金叉（J>K且J>D）✅",
         f"   • 上上根KDJ非金叉 ✅",
-        f"   • 排序 = 上上根振幅 × (杠杆/100)",
+        f"   • 排序 = 上上根涨幅 × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -244,15 +245,16 @@ def main():
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
+                f"   上上根涨幅: +{item['gain']}%\n"
+                f"   杠杆: {item['leverage']}x\n"
+                f"   排序值: {item['score']}\n"
                 f"   上根: {item['open1']} → {item['close1']} (收阳 ✅) 最低 {item['low1']} < {item['low2']}\n"
                 f"   上根KDJ: K={item['k1']}, D={item['d1']}, J={item['j1']} (J>K且J>D ✅)\n"
-                f"   上上根KDJ: K={item['k2']}, D={item['d2']}, J={item['j2']} (非金叉 ✅)\n"
-                f"   上上根振幅: {item['amplitude']}%, 杠杆: {item['leverage']}x\n"
-                f"   排序值: {item['score']}"
+                f"   上上根KDJ: K={item['k2']}, D={item['d2']}, J={item['j2']} (非金叉 ✅)"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：上根收阳创新低+金叉，上上根非金叉，按上上根加权波动强度排序")
+        msg_lines.append("💡 解读：上根收阳创新低+金叉，上上根非金叉，按上上根加权涨幅排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
