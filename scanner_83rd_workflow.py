@@ -81,7 +81,6 @@ def calculate_kdj(highs, lows, closes, rsv_period=9, smooth=3):
     return k_values, d_values, j_values
 
 def is_kdj_bullish(k, d, j):
-    """判断KDJ是否多头排列：J > K > D"""
     return j > k > d
 
 def ts_to_beijing(ts):
@@ -90,13 +89,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第83个工作流扫描（4小时震荡 + 1小时KDJ多头 + 上上根非多头 + 按振幅×杠杆/50从低到高排序）")
+    print(f"🚀 开始第83个工作流扫描（4小时震荡 + 1小时KDJ多头 + 上上根非多头 + 排序：50/(杠杆×振幅)从低到高）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 4小时级别：上根收盘 ∈ [上上根区间]（震荡）✅")
     print(f"   • 1小时级别：上根KDJ多头（J > K > D）✅")
     print(f"   • 1小时级别：上上根KDJ非多头（不满足J > K > D）✅")
-    print(f"   • 排序 = 上根1小时振幅 × (杠杆/50)（从低到高）")
+    print(f"   • 排序 = 50 / (杠杆 × 振幅)（从低到高）")
     print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
     print(f"📊 推送：前十名（微信推送）")
 
@@ -106,7 +105,6 @@ def main():
     markets = exchange.load_markets()
     print(f"📊 共加载 {len(markets)} 个交易对")
 
-    # 筛选 USDT 本位永续合约，并提取杠杆信息
     swap_symbols = []
     leverage_info = {}
     for symbol, market in markets.items():
@@ -128,13 +126,10 @@ def main():
         return
 
     # 目标K线时间戳
-    # 1小时级别
-    prev1_1h = get_period_start_timestamp(beijing_now, -1, 60)   # 上根1小时
-    prev2_1h = get_period_start_timestamp(beijing_now, -2, 60)   # 上上根1小时
-
-    # 4小时级别
-    prev1_4h = get_period_start_timestamp(beijing_now, -1, 240)  # 上根4小时
-    prev2_4h = get_period_start_timestamp(beijing_now, -2, 240)  # 上上根4小时
+    prev1_1h = get_period_start_timestamp(beijing_now, -1, 60)
+    prev2_1h = get_period_start_timestamp(beijing_now, -2, 60)
+    prev1_4h = get_period_start_timestamp(beijing_now, -1, 240)
+    prev2_4h = get_period_start_timestamp(beijing_now, -2, 240)
 
     print("📅 目标K线时间段（北京时间）:")
     print(f"   上根1小时: {ts_to_beijing(prev1_1h).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_1h)+timedelta(hours=1)).strftime('%H:%M')}")
@@ -147,34 +142,28 @@ def main():
 
     for idx, symbol in enumerate(swap_symbols):
         try:
-            # 获取1小时K线
             ohlcv_1h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1H, limit=50)
             if len(ohlcv_1h) < 30:
                 continue
 
-            # 获取4小时K线
             ohlcv_4h = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=15)
             if len(ohlcv_4h) < 4:
                 continue
 
-            # 1小时K线查找
             k1_1h = find_kline_by_timestamp(ohlcv_1h, prev1_1h)
             k2_1h = find_kline_by_timestamp(ohlcv_1h, prev2_1h)
             if None in (k1_1h, k2_1h):
                 continue
 
-            # 4小时K线查找
             k1_4h = find_kline_by_timestamp(ohlcv_4h, prev1_4h)
             k2_4h = find_kline_by_timestamp(ohlcv_4h, prev2_4h)
             if None in (k1_4h, k2_4h):
                 continue
 
-            # 提取1小时数据
             close1_1h = k1_1h[4]
             high1_1h = k1_1h[2]
             low1_1h = k1_1h[3]
 
-            # 提取4小时数据
             close1_4h = k1_4h[4]
             high2_4h = k2_4h[2]
             low2_4h = k2_4h[3]
@@ -182,11 +171,9 @@ def main():
             if low2_4h == 0 or low1_1h == 0:
                 continue
 
-            # 条件1：4小时上根震荡（收盘在上上根区间内）
             if not (low2_4h < close1_4h < high2_4h):
                 continue
 
-            # 计算KDJ（1小时）
             closes = [k[4] for k in ohlcv_1h]
             highs = [k[2] for k in ohlcv_1h]
             lows = [k[3] for k in ohlcv_1h]
@@ -195,33 +182,28 @@ def main():
             idx2 = next((i for i, k in enumerate(ohlcv_1h) if k[0] == prev2_1h), None)
             if None in (idx1, idx2):
                 continue
-            k1 = k_vals[idx1]
-            d1 = d_vals[idx1]
-            j1 = j_vals[idx1]
-            k2 = k_vals[idx2]
-            d2 = d_vals[idx2]
-            j2 = j_vals[idx2]
+            k1 = k_vals[idx1]; d1 = d_vals[idx1]; j1 = j_vals[idx1]
+            k2 = k_vals[idx2]; d2 = d_vals[idx2]; j2 = j_vals[idx2]
             if None in (k1, d1, j1, k2, d2, j2):
                 continue
 
-            # 条件2：上根KDJ多头（J > K > D）
             if not is_kdj_bullish(k1, d1, j1):
                 continue
 
-            # 条件3：上上根KDJ非多头（不满足J > K > D）
             if is_kdj_bullish(k2, d2, j2):
                 continue
 
-            # 排序指标：上根1小时振幅 × 杠杆/50
             amplitude = (high1_1h - low1_1h) / low1_1h * 100
             leverage = leverage_info[symbol]
-            score = amplitude * (leverage / 50)
+            if amplitude == 0:
+                continue
+            score = 50 / (leverage * amplitude)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'amplitude': round(amplitude, 2),
                 'leverage': round(leverage),
-                'score': round(score, 4),
+                'score': round(score, 6),
                 'close1_1h': round(close1_1h, 4),
                 'high1_1h': round(high1_1h, 4),
                 'low1_1h': round(low1_1h, 4),
@@ -243,7 +225,6 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按 score 从低到高排序（从小到大）
     result_list.sort(key=lambda x: x['score'])
     top = result_list[:PUSH_TOP_N]
 
@@ -255,7 +236,7 @@ def main():
         f"   • 4小时上根震荡 ✅",
         f"   • 1小时上根KDJ多头（J>K>D）✅",
         f"   • 1小时上上根KDJ非多头 ✅",
-        f"   • 排序 = 上根1小时振幅 × (杠杆/50)（从低到高）",
+        f"   • 排序 = 50 / (杠杆 × 振幅)（从低到高）",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -272,7 +253,7 @@ def main():
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：4小时震荡+1小时KDJ多头，按加权振幅从小到大排序")
+        msg_lines.append("💡 解读：4小时震荡+1小时KDJ多头，排序值越小表示杠杆越高或振幅越大")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
