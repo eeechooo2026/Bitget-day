@@ -67,11 +67,12 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第14个工作流扫描（4小时级别：突破前高 + 涨幅×杠杆/100排序）")
+    print(f"🚀 开始第14个工作流扫描（4小时级别：上根不震荡 + 按振幅×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上根收盘价 > 上上根最高价（突破前高）")
-    print(f"   • 排序指标 = 上根4小时K棒涨幅 × (最高杠杆倍数 / 100)")
+    print(f"   • 上根收盘价不在上上根区间内（不震荡）")
+    print(f"   • 排序指标 = 上根4小时K棒振幅 × (最高杠杆倍数 / 100)（从高到低）")
+    print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -123,29 +124,32 @@ def main():
             if k1 is None or k2 is None:
                 continue
 
-            open1 = k1[1]
             close1 = k1[4]
+            high1 = k1[2]
+            low1 = k1[3]
             high2 = k2[2]
-            if open1 == 0:
+            low2 = k2[3]
+
+            if low1 == 0 or low2 == 0:
                 continue
 
-            # 条件：上根收盘价 > 上上根最高价（突破前高）
-            if close1 <= high2:
+            # 条件：上根收盘价不在上上根区间内（不震荡）
+            if low2 < close1 < high2:
                 continue
 
-            # 计算涨幅
-            gain = (close1 - open1) / open1 * 100
+            # 计算振幅
+            amplitude = (high1 - low1) / low1 * 100
             leverage = leverage_info[symbol]
-            score = gain * (leverage / 100)
+            score = amplitude * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'gain': round(gain, 2),
+                'amplitude': round(amplitude, 2),
                 'leverage': round(leverage),
                 'score': round(score, 4),
-                'open1': round(open1, 4),
                 'close1': round(close1, 4),
                 'high2': round(high2, 4),
+                'low2': round(low2, 4),
             })
 
             if (idx+1) % 50 == 0:
@@ -161,11 +165,11 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时级别 突破+涨幅×杠杆/100 排行（第14个工作流）",
+        f"📊 Bitget 4小时级别 不震荡+振幅×杠杆/100 排行（第14个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根收盘价 > 上上根最高价（突破前高）",
-        f"   • 排序指标 = 上根4小时K棒涨幅 × (杠杆/100)",
+        f"   • 上根收盘价不在上上根区间内（不震荡）",
+        f"   • 排序指标 = 上根4小时K棒振幅 × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -173,15 +177,14 @@ def main():
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
-                f"   涨幅: +{item['gain']}%\n"
+                f"   振幅: {item['amplitude']}%\n"
                 f"   杠杆: {item['leverage']}x\n"
                 f"   指标值: {item['score']}\n"
-                f"   突破前高: {item['high2']} → {item['close1']} ✅\n"
-                f"   开盘: {item['open1']} → 收盘: {item['close1']}"
+                f"   上根收盘 {item['close1']} ∉ 上上根区间 [{item['low2']}, {item['high2']}] ✅"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个合约")
-        msg_lines.append("💡 解读：突破前高后，按加权涨幅排序")
+        msg_lines.append("💡 解读：上根不震荡，按振幅×杠杆排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的合约")
