@@ -58,14 +58,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第86个工作流扫描（1小时级别：上根收阳突破 + 上上根震荡 + 低点抬高 + 按低点差/振幅从低到高排序）")
+    print(f"🚀 开始第86个工作流扫描（1小时级别：上根收阳突破 + 上上根震荡 + 按|低点差|/振幅从低到高排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根收阳 ✅")
     print(f"   • 上根收盘价 > 上上根最高价（突破前高）✅")
     print(f"   • 上上根收盘价 ∈ [上上上根区间]（震荡）✅")
-    print(f"   • 上根最低价 > 上上根最低价（低点抬高）✅")
-    print(f"   • 排序 = (上根最低价 - 上上根最低价) / 上根振幅（从低到高）")
+    print(f"   • 排序 = |上根最低价 - 上上根最低价| / 上根振幅（从低到高）")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -148,25 +147,22 @@ def main():
             if not (low3 < close2 < high3):
                 continue
 
-            # 条件4：上根最低价 > 上上根最低价（低点抬高）
-            if low1 <= low2:
-                continue
-
             # 计算振幅
             amplitude = (high1 - low1) / low1 * 100
             if amplitude == 0:
                 continue
 
-            # 排序指标：(上根最低价 - 上上根最低价) / 上根振幅
+            # 排序指标：|上根最低价 - 上上根最低价| / 上根振幅
             low_diff = low1 - low2
-            score = low_diff / amplitude
+            abs_low_diff = abs(low_diff)
+            score = abs_low_diff / amplitude
 
             leverage = leverage_info[symbol]
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'score': round(score, 4),
-                'low_diff': round(low_diff, 4),
+                'abs_low_diff': round(abs_low_diff, 4),
                 'amplitude': round(amplitude, 2),
                 'leverage': round(leverage),
                 'close1': round(close1, 4),
@@ -199,8 +195,7 @@ def main():
         f"   • 上根收阳 ✅",
         f"   • 上根收盘价 > 上上根最高价 ✅",
         f"   • 上上根收盘价 ∈ [上上上根区间] ✅",
-        f"   • 上根最低价 > 上上根最低价 ✅",
-        f"   • 排序 = (低点差) / 上根振幅（从低到高）",
+        f"   • 排序 = |低点差| / 上根振幅（从低到高）",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -209,15 +204,15 @@ def main():
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   排序值: {item['score']}\n"
-                f"   低点差: {item['low_diff']}, 振幅: {item['amplitude']}%\n"
+                f"   低点差绝对值: {item['abs_low_diff']}, 振幅: {item['amplitude']}%\n"
                 f"   上上上根区间: [{item['low3']}, {item['high3']}]\n"
                 f"   上上根: {item['close2']} ∈ 区间 ✅, 最高 {item['high2']}\n"
-                f"   上根: {item['open1']} → {item['close1']} (收阳 ✅) 突破 {item['high2']}，最低 {item['low1']} > {item['low2']} ✅\n"
+                f"   上根: {item['open1']} → {item['close1']} (收阳 ✅) 突破 {item['high2']}\n"
                 f"   杠杆: {item['leverage']}x"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：上上根震荡 + 低点抬高 + 突破前高，按低点差/振幅排序")
+        msg_lines.append("💡 解读：上上根震荡 + 上根突破前高，按|低点差|/振幅从小到大排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
