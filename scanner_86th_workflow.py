@@ -58,13 +58,14 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第86个工作流扫描（1小时级别：收阳突破前高 + 按低点差/振幅从低到高排序）")
+    print(f"🚀 开始第86个工作流扫描（1小时级别：上根收阳突破 + 上上根震荡 + 低点抬高 + 按低点差/振幅从低到高排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根收阳 ✅")
     print(f"   • 上根收盘价 > 上上根最高价（突破前高）✅")
+    print(f"   • 上上根收盘价 ∈ [上上上根区间]（震荡）✅")
+    print(f"   • 上根最低价 > 上上根最低价（低点抬高）✅")
     print(f"   • 排序 = (上根最低价 - 上上根最低价) / 上根振幅（从低到高）")
-    print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -73,7 +74,7 @@ def main():
     markets = exchange.load_markets()
     print(f"📊 共加载 {len(markets)} 个交易对")
 
-    # 筛选 USDT 本位永续合约，并提取杠杆信息（用于显示）
+    # 筛选 USDT 本位永续合约，并提取杠杆信息
     swap_symbols = []
     leverage_info = {}
     for symbol, market in markets.items():
@@ -97,23 +98,26 @@ def main():
     # 目标K线时间戳
     prev1_ts = get_1h_period_start_timestamp(beijing_now, -1)   # 上根
     prev2_ts = get_1h_period_start_timestamp(beijing_now, -2)   # 上上根
+    prev3_ts = get_1h_period_start_timestamp(beijing_now, -3)   # 上上上根
 
     print("📅 目标K线时间段（北京时间）:")
     print(f"   上根: {ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts)+timedelta(hours=1)).strftime('%H:%M')}")
     print(f"   上上根: {ts_to_beijing(prev2_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev2_ts)+timedelta(hours=1)).strftime('%H:%M')}")
+    print(f"   上上上根: {ts_to_beijing(prev3_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev3_ts)+timedelta(hours=1)).strftime('%H:%M')}")
 
     print("⏳ 正在获取K线数据...")
     result_list = []
 
     for idx, symbol in enumerate(swap_symbols):
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1H, limit=10)
-            if len(ohlcv) < 3:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1H, limit=15)
+            if len(ohlcv) < 4:
                 continue
 
             k1 = find_kline_by_timestamp(ohlcv, prev1_ts)   # 上根
             k2 = find_kline_by_timestamp(ohlcv, prev2_ts)   # 上上根
-            if k1 is None or k2 is None:
+            k3 = find_kline_by_timestamp(ohlcv, prev3_ts)   # 上上上根
+            if None in (k1, k2, k3):
                 continue
 
             # 上根数据
@@ -122,10 +126,14 @@ def main():
             high1 = k1[2]
             low1 = k1[3]
             # 上上根数据
+            close2 = k2[4]
             high2 = k2[2]
             low2 = k2[3]
+            # 上上上根数据
+            high3 = k3[2]
+            low3 = k3[3]
 
-            if open1 == 0 or low1 == 0 or low2 == 0:
+            if any(v == 0 for v in [open1, low1, low2, low3]):
                 continue
 
             # 条件1：上根收阳
@@ -134,6 +142,14 @@ def main():
 
             # 条件2：上根收盘价 > 上上根最高价（突破前高）
             if close1 <= high2:
+                continue
+
+            # 条件3：上上根收盘价在上上上根区间内（震荡）
+            if not (low3 < close2 < high3):
+                continue
+
+            # 条件4：上根最低价 > 上上根最低价（低点抬高）
+            if low1 <= low2:
                 continue
 
             # 计算振幅
@@ -157,8 +173,11 @@ def main():
                 'open1': round(open1, 4),
                 'high1': round(high1, 4),
                 'low1': round(low1, 4),
+                'close2': round(close2, 4),
                 'high2': round(high2, 4),
                 'low2': round(low2, 4),
+                'high3': round(high3, 4),
+                'low3': round(low3, 4),
             })
 
             if (idx+1) % 50 == 0:
@@ -174,12 +193,14 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 1小时级别突破形态扫描（第86个工作流）",
+        f"📊 Bitget 1小时级别多重形态扫描（第86个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 上根收阳 ✅",
-        f"   • 上根收盘价 > 上上根最高价（突破前高）✅",
-        f"   • 排序 = (上根最低价 - 上上根最低价) / 上根振幅（从低到高）",
+        f"   • 上根收盘价 > 上上根最高价 ✅",
+        f"   • 上上根收盘价 ∈ [上上上根区间] ✅",
+        f"   • 上根最低价 > 上上根最低价 ✅",
+        f"   • 排序 = (低点差) / 上根振幅（从低到高）",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -189,13 +210,14 @@ def main():
                 f"{i}. {item['symbol']}\n"
                 f"   排序值: {item['score']}\n"
                 f"   低点差: {item['low_diff']}, 振幅: {item['amplitude']}%\n"
-                f"   上上根区间: [{item['low2']}, {item['high2']}]\n"
-                f"   上根: {item['open1']} → {item['close1']} (收阳 ✅) 突破前高 {item['high2']}\n"
+                f"   上上上根区间: [{item['low3']}, {item['high3']}]\n"
+                f"   上上根: {item['close2']} ∈ 区间 ✅, 最高 {item['high2']}\n"
+                f"   上根: {item['open1']} → {item['close1']} (收阳 ✅) 突破 {item['high2']}，最低 {item['low1']} > {item['low2']} ✅\n"
                 f"   杠杆: {item['leverage']}x"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：上根收阳突破前高，按低点差/振幅从小到大排序（值越小表示低点抬升越明显）")
+        msg_lines.append("💡 解读：上上根震荡 + 低点抬高 + 突破前高，按低点差/振幅排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
