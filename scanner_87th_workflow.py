@@ -67,13 +67,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第87个工作流扫描（4小时级别：上根收阳震荡 + 上上根收阴震荡 + 上上上根突破 + 排序：[max(上上根最高,上上上根最高)-上根最高]×杠杆/100）")
+    print(f"🚀 开始第87个工作流扫描（4小时级别：上根收阳震荡 + 上上根收阴震荡 + 上上上根突破 + 排序：[max(上上根最高,上上上根最高)-上根最高]/上根最高×杠杆/100）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根收阳 + 收盘 ∈ [上上根区间]（震荡）✅")
     print(f"   • 上上根收阴 + 收盘 ∈ [上上上根区间]（震荡）✅")
     print(f"   • 上上上根收阳 + 收盘 > 上上上上根最高价（突破前高）✅")
-    print(f"   • 排序 = (max(上上根最高, 上上上根最高) - 上根最高) × (杠杆/100)（从高到低）")
+    print(f"   • 排序 = ((max(上上根最高, 上上上根最高) - 上根最高) / 上根最高) × (杠杆/100)（从高到低）")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -131,10 +131,10 @@ def main():
             if None in (k1, k2, k3, k4):
                 continue
 
-            # 上根数据（新增最高价用于排序）
+            # 上根数据
             close1 = k1[4]
             open1 = k1[1]
-            high1 = k1[2]          # 新增：上根最高价
+            high1 = k1[2]
             # 上上根数据
             close2 = k2[4]
             open2 = k2[1]
@@ -148,7 +148,7 @@ def main():
             # 上上上上根数据
             high4 = k4[2]
 
-            if any(v == 0 for v in [open1, open2, open3, low2, low3, high4]):
+            if any(v == 0 for v in [open1, open2, open3, low2, low3, high4, high1]):
                 continue
 
             # 条件1：上根收阳 + 收盘价在上上根区间内
@@ -169,15 +169,17 @@ def main():
             if close3 <= high4:
                 continue
 
-            # 排序指标：(max(上上根最高, 上上上根最高) - 上根最高) × 杠杆/100
+            # 排序指标：((max(上上根最高, 上上上根最高) - 上根最高) / 上根最高) × 杠杆/100
             max_prev_high = max(high2, high3)
-            diff = max_prev_high - high1
+            diff_abs = max_prev_high - high1
+            diff_rel = diff_abs / high1          # 相对差值
             leverage = leverage_info[symbol]
-            score = diff * (leverage / 100)
+            score = diff_rel * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'diff': round(diff, 4),
+                'diff_abs': round(diff_abs, 4),
+                'diff_rel': round(diff_rel, 4),
                 'leverage': round(leverage),
                 'score': round(score, 4),
                 'close1': round(close1, 4),
@@ -213,7 +215,7 @@ def main():
         f"   • 上根收阳 + 收盘 ∈ [上上根区间] ✅",
         f"   • 上上根收阴 + 收盘 ∈ [上上上根区间] ✅",
         f"   • 上上上根收阳 + 收盘 > 上上上上根最高价 ✅",
-        f"   • 排序 = (max(上上根最高, 上上上根最高) - 上根最高) × (杠杆/100)",
+        f"   • 排序 = ((max(上上根最高, 上上上根最高) - 上根最高) / 上根最高) × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -221,7 +223,8 @@ def main():
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
-                f"   差值: {item['diff']}\n"
+                f"   相对差值: {item['diff_rel']:.4f}\n"
+                f"   绝对差值: {item['diff_abs']}\n"
                 f"   杠杆: {item['leverage']}x\n"
                 f"   排序值: {item['score']}\n"
                 f"   上上上上根最高: {item['high4']}\n"
@@ -231,7 +234,7 @@ def main():
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：双震荡 + 突破前高，按前高与上根最高价差值排序")
+        msg_lines.append("💡 解读：双震荡 + 突破前高，按前高相对上根最高价的溢价幅度排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
