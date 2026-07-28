@@ -67,12 +67,11 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第14个工作流扫描（4小时级别：上根不震荡 + 按振幅×杠杆/100排序）")
+    print(f"🚀 开始第14个工作流扫描（4小时级别：涨幅×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 上根收盘价不在上上根区间内（不震荡）")
-    print(f"   • 排序指标 = 上根4小时K棒振幅 × (最高杠杆倍数 / 100)（从高到低）")
-    print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
+    print(f"   • 扫描所有USDT本位永续合约（无筛选条件）")
+    print(f"   • 排序指标 = 上根4小时K棒涨幅 × (最高杠杆倍数 / 100)")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -102,13 +101,11 @@ def main():
         print("❌ 未找到合约交易对")
         return
 
-    # 目标K线时间戳
-    prev1_ts = get_4h_period_start_timestamp(beijing_now, -1)   # 上根
-    prev2_ts = get_4h_period_start_timestamp(beijing_now, -2)   # 上上根
+    # 目标K线时间戳（上根4小时）
+    prev1_ts = get_4h_period_start_timestamp(beijing_now, -1)
 
     print("📅 目标K线时间段（北京时间）:")
-    print(f"   上根: {ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts)+timedelta(hours=4)).strftime('%H:%M')}")
-    print(f"   上上根: {ts_to_beijing(prev2_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev2_ts)+timedelta(hours=4)).strftime('%H:%M')}")
+    print(f"   上根4小时: {ts_to_beijing(prev1_ts).strftime('%Y-%m-%d %H:%M')} - {(ts_to_beijing(prev1_ts)+timedelta(hours=4)).strftime('%H:%M')}")
 
     print("⏳ 正在获取K线数据...")
     result_list = []
@@ -116,40 +113,30 @@ def main():
     for idx, symbol in enumerate(swap_symbols):
         try:
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_4H, limit=10)
-            if len(ohlcv) < 3:
+            if len(ohlcv) < 2:
                 continue
 
             k1 = find_kline_by_timestamp(ohlcv, prev1_ts)
-            k2 = find_kline_by_timestamp(ohlcv, prev2_ts)
-            if k1 is None or k2 is None:
+            if k1 is None:
                 continue
 
+            open1 = k1[1]
             close1 = k1[4]
-            high1 = k1[2]
-            low1 = k1[3]
-            high2 = k2[2]
-            low2 = k2[3]
-
-            if low1 == 0 or low2 == 0:
+            if open1 == 0:
                 continue
 
-            # 条件：上根收盘价不在上上根区间内（不震荡）
-            if low2 < close1 < high2:
-                continue
-
-            # 计算振幅
-            amplitude = (high1 - low1) / low1 * 100
+            # 计算涨幅
+            gain = (close1 - open1) / open1 * 100
             leverage = leverage_info[symbol]
-            score = amplitude * (leverage / 100)
+            score = gain * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'amplitude': round(amplitude, 2),
+                'gain': round(gain, 2),
                 'leverage': round(leverage),
                 'score': round(score, 4),
+                'open1': round(open1, 4),
                 'close1': round(close1, 4),
-                'high2': round(high2, 4),
-                'low2': round(low2, 4),
             })
 
             if (idx+1) % 50 == 0:
@@ -165,11 +152,11 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时级别 不震荡+振幅×杠杆/100 排行（第14个工作流）",
+        f"📊 Bitget 4小时级别 涨幅×杠杆/100 排行（第14个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 上根收盘价不在上上根区间内（不震荡）",
-        f"   • 排序指标 = 上根4小时K棒振幅 × (杠杆/100)",
+        f"   • 扫描所有USDT本位永续合约",
+        f"   • 排序指标 = 上根4小时K棒涨幅 × (杠杆/100)",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -177,17 +164,17 @@ def main():
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
-                f"   振幅: {item['amplitude']}%\n"
+                f"   涨幅: +{item['gain']}%\n"
                 f"   杠杆: {item['leverage']}x\n"
                 f"   指标值: {item['score']}\n"
-                f"   上根收盘 {item['close1']} ∉ 上上根区间 [{item['low2']}, {item['high2']}] ✅"
+                f"   开盘: {item['open1']} → 收盘: {item['close1']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个合约")
-        msg_lines.append("💡 解读：上根不震荡，按振幅×杠杆排序")
+        msg_lines.append("💡 解读：指标值 = 涨幅 × (杠杆/100)，反映单位保证金下的上涨贡献")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
-        msg_lines.append("😔 未找到符合条件的合约")
+        msg_lines.append("😔 未找到K线数据")
 
     message = "\n".join(msg_lines)
     print("\n" + "="*50)
