@@ -89,12 +89,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第91个工作流扫描（1小时级别：上根KDJ多头 + 上上根非多头 + 上根震荡 + 按振幅×杠杆/100排序）")
+    print(f"🚀 开始第91个工作流扫描（1小时级别：上根KDJ多头 + 上上根非多头 + 上根震荡 + 上根收阳 + 按振幅×杠杆/100排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根KDJ多头排列（J > K > D）✅")
     print(f"   • 上上根KDJ非多头排列（不满足J > K > D）✅")
     print(f"   • 上根收盘价 ∈ [上上根区间]（震荡）✅")
+    print(f"   • 上根收阳（收盘价 > 开盘价）✅")
     print(f"   • 排序 = 上根振幅 × (最高杠杆倍数 / 100)（从高到低）")
     print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
     print(f"📊 推送：前十名（微信推送）")
@@ -183,6 +184,10 @@ def main():
             if not (low2 < close1 < high2):
                 continue
 
+            # 条件4：上根收阳
+            if close1 <= open1:
+                continue
+
             # 计算振幅
             amplitude = (high1 - low1) / low1 * 100
             leverage = leverage_info[symbol]
@@ -220,12 +225,13 @@ def main():
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 1小时级别KDJ多头+震荡扫描（第91个工作流）",
+        f"📊 Bitget 1小时级别KDJ多头+震荡+收阳扫描（第91个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 上根KDJ多头（J>K>D）✅",
         f"   • 上上根KDJ非多头 ✅",
         f"   • 上根震荡（收盘 ∈ [上上根区间]）✅",
+        f"   • 上根收阳 ✅",
         f"   • 排序 = 上根振幅 × (杠杆/100)（从高到低）",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -239,11 +245,11 @@ def main():
                 f"   排序值: {item['score']}\n"
                 f"   上根KDJ: K={item['k1']}, D={item['d1']}, J={item['j1']} (J>K>D ✅)\n"
                 f"   上上根KDJ: K={item['k2']}, D={item['d2']}, J={item['j2']} (非J>K>D ✅)\n"
-                f"   上根收盘 {item['close1']} ∈ 上上根区间 [{item['low2']}, {item['high2']}] ✅"
+                f"   上根: {item['open1']} → {item['close1']} (收阳 ✅) 震荡于 [{item['low2']}, {item['high2']}] ✅"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：KDJ多头+上根震荡，按加权振幅排序")
+        msg_lines.append("💡 解读：KDJ多头+震荡+收阳，按加权振幅排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
