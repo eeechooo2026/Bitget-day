@@ -67,11 +67,11 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第14个工作流扫描（4小时级别：涨幅×杠杆/100排序）")
+    print(f"🚀 开始第14个工作流扫描（4小时级别涨幅榜 - 原始版本）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 扫描所有USDT本位永续合约（无筛选条件）")
-    print(f"   • 排序指标 = 上根4小时K棒涨幅 × (最高杠杆倍数 / 100)")
+    print(f"   • 排序指标 = 上根4小时K棒涨幅（从高到低）")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -80,7 +80,7 @@ def main():
     markets = exchange.load_markets()
     print(f"📊 共加载 {len(markets)} 个交易对")
 
-    # 筛选 USDT 本位永续合约，并提取杠杆信息
+    # 筛选 USDT 本位永续合约，并提取杠杆信息（仅用于显示）
     swap_symbols = []
     leverage_info = {}
     for symbol, market in markets.items():
@@ -128,13 +128,11 @@ def main():
             # 计算涨幅
             gain = (close1 - open1) / open1 * 100
             leverage = leverage_info[symbol]
-            score = gain * (leverage / 100)
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'gain': round(gain, 2),
                 'leverage': round(leverage),
-                'score': round(score, 4),
                 'open1': round(open1, 4),
                 'close1': round(close1, 4),
             })
@@ -146,32 +144,31 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按 score 从高到低排序
-    result_list.sort(key=lambda x: x['score'], reverse=True)
+    # 按涨幅从高到低排序
+    result_list.sort(key=lambda x: x['gain'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 4小时级别 涨幅×杠杆/100 排行（第14个工作流）",
+        f"📊 Bitget 4小时级别涨幅榜（第14个工作流 - 原始版本）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 扫描所有USDT本位永续合约",
-        f"   • 排序指标 = 上根4小时K棒涨幅 × (杠杆/100)",
+        f"   • 排序指标 = 上根4小时K棒涨幅",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 排行榜前十名（共{len(result_list)}个合约）：")
+        msg_lines.append(f"📋 涨幅榜前十名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
                 f"   涨幅: +{item['gain']}%\n"
                 f"   杠杆: {item['leverage']}x\n"
-                f"   指标值: {item['score']}\n"
                 f"   开盘: {item['open1']} → 收盘: {item['close1']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个合约")
-        msg_lines.append("💡 解读：指标值 = 涨幅 × (杠杆/100)，反映单位保证金下的上涨贡献")
+        msg_lines.append("💡 解读：上根4小时K棒涨幅排名（纯涨幅，不含杠杆加权）")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到K线数据")
