@@ -67,13 +67,13 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第100个工作流扫描（4小时级别：双K线震荡 + 按振幅之和排序）")
+    print(f"🚀 开始第100个工作流扫描（4小时级别：双K线震荡 + 按合并振幅排序）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 上根收盘价 ∈ [上上根区间]（震荡）✅")
     print(f"   • 上上根收盘价 ∈ [上上上根区间]（震荡）✅")
-    print(f"   • 排序 = 上根振幅 + 上上根振幅（从高到低）")
-    print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
+    print(f"   • 排序 = 合并振幅：取上根/上上根中最高最高价与最低最低价的振幅（从高到低）")
+    print(f"   • 振幅 = (max(high1, high2) - min(low1, low2)) / min(low1, low2) × 100%")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -151,17 +151,17 @@ def main():
             if not (low3 < close2 < high3):
                 continue
 
-            # 计算振幅
-            amplitude1 = (high1 - low1) / low1 * 100
-            amplitude2 = (high2 - low2) / low2 * 100
-            total_amplitude = amplitude1 + amplitude2
+            # 计算合并振幅：取上根和上上根中最高最高价与最低最低价
+            high_max = max(high1, high2)
+            low_min = min(low1, low2)
+            combined_amplitude = (high_max - low_min) / low_min * 100
             leverage = leverage_info[symbol]
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'amplitude1': round(amplitude1, 2),
-                'amplitude2': round(amplitude2, 2),
-                'total_amplitude': round(total_amplitude, 2),
+                'combined_amplitude': round(combined_amplitude, 2),
+                'high_max': round(high_max, 4),
+                'low_min': round(low_min, 4),
                 'leverage': round(leverage),
                 'close1': round(close1, 4),
                 'high2': round(high2, 4),
@@ -178,8 +178,8 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按总振幅从高到低排序
-    result_list.sort(key=lambda x: x['total_amplitude'], reverse=True)
+    # 按合并振幅从高到低排序
+    result_list.sort(key=lambda x: x['combined_amplitude'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
@@ -189,7 +189,7 @@ def main():
         f"📈 策略逻辑：",
         f"   • 上根收盘 ∈ [上上根区间] ✅",
         f"   • 上上根收盘 ∈ [上上上根区间] ✅",
-        f"   • 排序 = 上根振幅 + 上上根振幅（从高到低）",
+        f"   • 排序 = 上根+上上根合并振幅（从高到低）",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
@@ -197,16 +197,15 @@ def main():
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
-                f"   上根振幅: {item['amplitude1']}%\n"
-                f"   上上根振幅: {item['amplitude2']}%\n"
-                f"   振幅之和: {item['total_amplitude']}%\n"
+                f"   合并振幅: {item['combined_amplitude']}%\n"
+                f"   区间: [{item['low_min']}, {item['high_max']}]\n"
                 f"   杠杆: {item['leverage']}x\n"
                 f"   上根收盘 {item['close1']} ∈ 上上根区间 [{item['low2']}, {item['high2']}] ✅\n"
                 f"   上上根收盘 {item['close2']} ∈ 上上上根区间 [{item['low3']}, {item['high3']}] ✅"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的币种")
-        msg_lines.append("💡 解读：连续两根K线在各自前一根K线区间内震荡，按波动强度之和排序")
+        msg_lines.append("💡 解读：连续两根K线在各自前一根K线区间内震荡，按整体波动幅度排序")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的币种")
