@@ -58,12 +58,11 @@ def ts_to_beijing(ts):
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第97个工作流扫描（1小时级别振幅榜）")
+    print(f"🚀 开始第97个工作流扫描（1小时级别涨幅榜）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
     print(f"   • 扫描所有USDT本位永续合约（无筛选条件）")
-    print(f"   • 排序指标 = 上根1小时K棒振幅（从高到低）")
-    print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
+    print(f"   • 排序指标 = 上根1小时K棒涨幅（从高到低）")
     print(f"📊 推送：前十名（微信推送）")
 
     exchange = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -112,21 +111,21 @@ def main():
             if k1 is None:
                 continue
 
-            high1 = k1[2]
-            low1 = k1[3]
-            if low1 == 0:
+            open1 = k1[1]
+            close1 = k1[4]
+            if open1 == 0:
                 continue
 
-            # 计算振幅
-            amplitude = (high1 - low1) / low1 * 100
+            # 计算涨幅
+            gain = (close1 - open1) / open1 * 100
             leverage = leverage_info[symbol]
 
             result_list.append({
                 'symbol': symbol.replace('/USDT:USDT', ''),
-                'amplitude': round(amplitude, 2),
+                'gain': round(gain, 2),
                 'leverage': round(leverage),
-                'high1': round(high1, 4),
-                'low1': round(low1, 4),
+                'open1': round(open1, 4),
+                'close1': round(close1, 4),
             })
 
             if (idx+1) % 50 == 0:
@@ -136,32 +135,31 @@ def main():
             print(f"⚠️ 分析 {symbol} 时出错: {e}")
             time.sleep(0.3)
 
-    # 按振幅从高到低排序
-    result_list.sort(key=lambda x: x['amplitude'], reverse=True)
+    # 按涨幅从高到低排序
+    result_list.sort(key=lambda x: x['gain'], reverse=True)
     top = result_list[:PUSH_TOP_N]
 
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M')
     msg_lines = [
-        f"📊 Bitget 1小时级别振幅榜（第97个工作流）",
+        f"📊 Bitget 1小时级别涨幅榜（第97个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
         f"   • 扫描所有USDT本位永续合约",
-        f"   • 排序指标 = 上根1小时K棒振幅",
-        f"   • 振幅衡量的波动强度（不分涨跌）",
+        f"   • 排序指标 = 上根1小时K棒涨幅",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
     if top:
-        msg_lines.append(f"📋 振幅榜前十名（共{len(result_list)}个合约）：")
+        msg_lines.append(f"📋 涨幅榜前十名（共{len(result_list)}个合约）：")
         for i, item in enumerate(top, 1):
             msg_lines.append(
                 f"{i}. {item['symbol']}\n"
-                f"   振幅: {item['amplitude']}%\n"
+                f"   涨幅: +{item['gain']}%\n"
                 f"   杠杆: {item['leverage']}x\n"
-                f"   最低: {item['low1']} → 最高: {item['high1']}"
+                f"   开盘: {item['open1']} → 收盘: {item['close1']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个合约")
-        msg_lines.append("💡 解读：上根1小时K棒振幅排名（波动越激烈越靠前，不分涨跌）")
+        msg_lines.append("💡 解读：上根1小时K棒涨幅排名")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到K线数据")
