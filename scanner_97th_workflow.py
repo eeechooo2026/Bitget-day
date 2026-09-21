@@ -10,6 +10,7 @@ WX_PUSHER_UID = "UID_Lrlwr0VJuCwmT3sCGP2yJbLOCQhU"
 
 PUSH_TOP_N = 10
 TIMEFRAME_1H = '1h'
+MA5_PERIOD = 5
 # =============================================
 
 def send_push_wxpusher(message):
@@ -52,16 +53,29 @@ def find_kline_by_timestamp(ohlcv, target_ts):
             return k
     return None
 
+def calculate_ma_for_target_kline(ohlcv, target_ts, period):
+    """基于目标K线向前取period根K线（包含本身）计算移动平均"""
+    target_idx = None
+    for i, k in enumerate(ohlcv):
+        if k[0] == target_ts:
+            target_idx = i
+            break
+    if target_idx is None or target_idx < period - 1:
+        return None
+    closes = [ohlcv[j][4] for j in range(target_idx - period + 1, target_idx + 1)]
+    return sum(closes) / period
+
 def ts_to_beijing(ts):
     return datetime.fromtimestamp(ts/1000) + timedelta(hours=8)
 
 def main():
     utc_now = get_utc_now()
     beijing_now = utc_now + timedelta(hours=8)
-    print(f"🚀 开始第97个工作流扫描（1小时级别振幅榜）")
+    print(f"🚀 开始第97个工作流扫描（1小时级别振幅榜 + 收盘>MA5）")
     print(f"   当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📈 策略逻辑：")
-    print(f"   • 扫描所有USDT本位永续合约（无筛选条件）")
+    print(f"   • 扫描所有USDT本位永续合约")
+    print(f"   • 上根1小时K棒收盘价 > MA5")
     print(f"   • 排序指标 = 上根1小时K棒振幅（从高到低）")
     print(f"   • 振幅 = (最高价 - 最低价) / 最低价 × 100%")
     print(f"📊 推送：前十名（微信推送）")
@@ -104,17 +118,23 @@ def main():
 
     for idx, symbol in enumerate(swap_symbols):
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1H, limit=10)
-            if len(ohlcv) < 2:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME_1H, limit=20)
+            if len(ohlcv) < 6:  # 至少需要6根K线才能计算MA5并包含上根
                 continue
 
             k1 = find_kline_by_timestamp(ohlcv, prev1_ts)
             if k1 is None:
                 continue
 
+            close1 = k1[4]
             high1 = k1[2]
             low1 = k1[3]
             if low1 == 0:
+                continue
+
+            # 条件1：上根收盘价 > MA5
+            ma5 = calculate_ma_for_target_kline(ohlcv, prev1_ts, MA5_PERIOD)
+            if ma5 is None or close1 <= ma5:
                 continue
 
             # 计算振幅
@@ -125,6 +145,8 @@ def main():
                 'symbol': symbol.replace('/USDT:USDT', ''),
                 'amplitude': round(amplitude, 2),
                 'leverage': round(leverage),
+                'close1': round(close1, 4),
+                'ma5': round(ma5, 4),
                 'high1': round(high1, 4),
                 'low1': round(low1, 4),
             })
@@ -145,7 +167,7 @@ def main():
         f"📊 Bitget 1小时级别振幅榜（第97个工作流）",
         f"🕘 时间：{current_time}（北京时间）",
         f"📈 策略逻辑：",
-        f"   • 扫描所有USDT本位永续合约",
+        f"   • 上根收盘价 > MA5 ✅",
         f"   • 排序指标 = 上根1小时K棒振幅",
         f"   • 振幅衡量的波动强度（不分涨跌）",
         f"━━━━━━━━━━━━━━━━━━━━"
@@ -157,14 +179,15 @@ def main():
                 f"{i}. {item['symbol']}\n"
                 f"   振幅: {item['amplitude']}%\n"
                 f"   杠杆: {item['leverage']}x\n"
+                f"   收盘 {item['close1']} > MA5({item['ma5']}) ✅\n"
                 f"   最低: {item['low1']} → 最高: {item['high1']}"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个合约")
-        msg_lines.append("💡 解读：上根1小时K棒振幅排名（波动越激烈越靠前，不分涨跌）")
+        msg_lines.append("💡 解读：上根1小时K棒振幅排名（波动越激烈越靠前，且收盘站上MA5）")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
-        msg_lines.append("😔 未找到K线数据")
+        msg_lines.append("😔 未找到符合条件的合约")
 
     message = "\n".join(msg_lines)
     print("\n" + "="*50)
