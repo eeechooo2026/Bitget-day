@@ -1,0 +1,19 @@
+name: Bitget 第102个工作流 - 1小时级别收阴站上MA5扫描（每小时整点）
+
+on:
+  schedule:
+    # 每小时整点运行（UTC时间），对应北京时间每个整点
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 102nd workflow scan
+        run: python scanner_102nd_workflow.py
