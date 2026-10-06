@@ -90,6 +90,7 @@ def main():
     print(f"📈 策略逻辑（底背离）：")
     print(f"   • 上根最低价 < 上上根最低价（价格创新低）")
     print(f"   • 上根J值 > 上上根J值（J值走高）")
+    print(f"   • 上根收盘价在上上根最高价与最低价之间")
     print(f"   • 排序 = 上根振幅（从高到低）")
     print(f"📊 推送：前十名（微信推送）")
 
@@ -142,6 +143,9 @@ def main():
 
             high1 = k1[2]
             low1 = k1[3]
+            close1 = k1[4]
+
+            high2 = k2[2]
             low2 = k2[3]
 
             if low1 == 0 or low2 == 0:
@@ -169,6 +173,10 @@ def main():
             if j1 <= j2:
                 continue
 
+            # 条件3：上根收盘价在上上根最高价与最低价之间
+            if not (low2 <= close1 <= high2):
+                continue
+
             # 计算振幅
             amplitude = (high1 - low1) / low1 * 100
             leverage = leverage_info[symbol]
@@ -179,6 +187,8 @@ def main():
                 'leverage': round(leverage),
                 'high1': round(high1, 4),
                 'low1': round(low1, 4),
+                'close1': round(close1, 4),
+                'high2': round(high2, 4),
                 'low2': round(low2, 4),
                 'j1': round(j1, 2),
                 'j2': round(j2, 2),
@@ -202,6 +212,7 @@ def main():
         f"📈 策略逻辑（底背离）：",
         f"   • 上根最低价 < 上上根最低价（价格创新低）",
         f"   • 上根J值 > 上上根J值（J值走高）",
+        f"   • 上根收盘价在上上根最高价与最低价之间",
         f"   • 排序 = 上根振幅（从高到低）",
         f"━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -213,11 +224,12 @@ def main():
                 f"   上根振幅: {item['amplitude']}%\n"
                 f"   杠杆: {item['leverage']}x\n"
                 f"   价格: 低点 {item['low2']} → {item['low1']} (创新低 ✅)\n"
+                f"   上根收盘: {item['close1']} (位于上上根区间 {item['low2']} ~ {item['high2']} 内 ✅)\n"
                 f"   J值: {item['j2']} → {item['j1']} (走高 ✅)"
             )
         msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
         msg_lines.append(f"📊 共筛选出 {len(result_list)} 个符合条件的合约")
-        msg_lines.append("💡 解读：价格创新低但J值走高，形成底背离（看涨信号）")
+        msg_lines.append("💡 解读：价格创新低但J值走高，形成底背离（看涨信号），且上根收盘价处于上上根K线区间内")
         msg_lines.append("⚠️ 此信息仅供参考，不构成投资建议")
     else:
         msg_lines.append("😔 未找到符合条件的合约")
