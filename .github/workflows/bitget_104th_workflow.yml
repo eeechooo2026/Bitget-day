@@ -1,0 +1,18 @@
+name: Bitget 第104个工作流 - 1小时级别顶背离扫描（每小时整点）
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 104th workflow scan
+        run: python scanner_104th_workflow.py
