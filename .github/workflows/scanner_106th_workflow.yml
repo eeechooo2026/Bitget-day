@@ -1,0 +1,18 @@
+name: Bitget 第106个工作流 - 1小时级别 MA多头排列+创新低 扫描（每小时整点）
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Run 106th workflow scan
+        run: python scanner_106th_workflow.py
